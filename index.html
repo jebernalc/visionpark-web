@@ -16,7 +16,7 @@
 <main class="shell" id="auth-shell">
   <header class="brand">
     <svg viewBox="0 0 32 32" width="36" height="36" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8" fill="none" stroke="#4FD1C5" stroke-width="2"/><path d="M9 12V9h3M20 9h3v3M23 20v3h-3M12 23H9v-3" fill="none" stroke="#4FD1C5" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="16" r="3.5" fill="#4FD1C5"/></svg>
-    <div><h1>VISIONPARK</h1><p>FORENSIC AI · <span id="version">v0.2.2</span></p></div>
+    <div><h1>VISIONPARK</h1><p>FORENSIC AI · <span id="version">v0.3.0</span></p></div>
   </header>
 
   <section class="card" id="auth-card" aria-labelledby="t-auth">
@@ -69,13 +69,13 @@
 
   <section class="card" id="recovery-card" hidden aria-labelledby="t-rec">
     <h2 id="t-rec">Define tu nueva contraseña</h2>
-    <p class="muted">Escribe una contraseña nueva de al menos 8 caracteres.</p>
+    <p class="muted" id="rec-hint">Escribe una contraseña nueva de al menos 8 caracteres.</p>
     <form id="recovery-form" novalidate>
       <label for="new-pw">Nueva contraseña</label>
       <input id="new-pw" type="password" autocomplete="new-password" minlength="8" required>
       <label for="new-pw2">Repite la contraseña</label>
       <input id="new-pw2" type="password" autocomplete="new-password" minlength="8" required>
-      <div class="row"><button type="submit" class="primary" id="btn-newpw">Guardar contraseña</button></div>
+      <div class="row"><button type="submit" class="primary" id="btn-newpw">Guardar contraseña</button><button type="button" id="btn-rec-out" hidden>Salir</button></div>
     </form>
     <p id="rec-msg" class="msg" role="status"></p>
   </section>

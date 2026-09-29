@@ -1,5 +1,10 @@
 # Historial de versiones
 
+## 0.3.0 · 2026-09-29
+- Contraseña temporal con cambio obligatorio: quien entra con una clave temporal debe crear una propia antes de usar la aplicación; la marca se borra sola al cambiarla.
+- Equipo y sedes: botón «Clave temporal» por miembro (genera la clave, cierra sus sesiones, la muestra una sola vez y permite enviarla desde el correo del administrador).
+- Migración 07: marca en los metadatos de aplicación (no editable por el usuario), disparador que la borra al cambiar la contraseña y registro en auditoría.
+
 ## 0.2.2 · 2026-09-29
 - Mensaje claro cuando se alcanza el límite de correos por hora y qué hacer mientras tanto.
 - Al recuperar la contraseña la pestaña «Ingresar» queda marcada.

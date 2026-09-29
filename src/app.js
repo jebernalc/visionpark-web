@@ -50,6 +50,7 @@ $('link-forgot-pw').addEventListener('click', () => setMode('reset'));
 $('link-back').addEventListener('click', () => setMode('login'));
 $('link-forgot-acc').addEventListener('click', () => { $('acc-help').hidden = !$('acc-help').hidden; });
 $('btn-acc-to-pw').addEventListener('click', () => { setMode('reset'); $('email').focus(); });
+$('btn-rec-out').addEventListener('click', () => { recovering = false; supabase.auth.signOut(); });
 $('btn-show').addEventListener('click', () => {
   const show = $('password').type === 'password';
   $('password').type = show ? 'text' : 'password';
@@ -173,6 +174,12 @@ async function boot() {
   if (!user) return;
   ctx.user = user;
   $('who').textContent = user.email;
+  if (user.app_metadata?.must_change_password) {
+    recovering = true;
+    $('rec-hint').textContent = 'Entraste con una contraseña temporal. Por seguridad, define ahora una contraseña propia de al menos 8 caracteres para continuar.';
+    $('btn-rec-out').hidden = false;
+    return show('recovery');
+  }
   let rows;
   try { rows = await db(supabase.from('user_sites').select('site_id, role, org_id, organizations(id,name)').eq('user_id', user.id)); }
   catch (e) { return show('onboard', 'Error leyendo tu acceso: ' + e.message, 'error'); }
@@ -210,7 +217,8 @@ $('recovery-form').addEventListener('submit', async (e) => {
   const { error } = await supabase.auth.updateUser({ password: p1 });
   $('btn-newpw').disabled = false;
   if (error) return say(msg, friendly(error), 'error');
-  recovering = false; $('new-pw').value = $('new-pw2').value = '';
+  recovering = false; $('new-pw').value = $('new-pw2').value = ''; $('btn-rec-out').hidden = true;
+  await supabase.auth.refreshSession();
   toast('Contraseña actualizada.');
   boot();
 });
@@ -226,7 +234,7 @@ $('recovery-form').addEventListener('submit', async (e) => {
 }
 
 supabase.auth.onAuthStateChange((event, session) => {
-  if (event === 'PASSWORD_RECOVERY') { recovering = true; show('recovery'); return; }
+  if (event === 'PASSWORD_RECOVERY') { recovering = true; $('rec-hint').textContent = 'Escribe una contraseña nueva de al menos 8 caracteres.'; show('recovery'); return; }
   if (recovering || event === 'USER_UPDATED') return;
   if (!session) { ctx.user = null; ctx.org = null; ctx.site = null; show('auth'); return; }
   if (event === 'TOKEN_REFRESHED' || (event === 'SIGNED_IN' && ctx.user?.id === session.user.id && !$('app').hidden)) return;

@@ -1,4 +1,4 @@
-import { supabase, ctx, h, db, toast, badge, empty, field, select, roleLabel, ROLES } from '../lib.js';
+import { supabase, ctx, h, db, toast, badge, empty, field, select, roleLabel, ROLES, openModal } from '../lib.js';
 
 export default {
   id: 'equipo', title: 'Equipo y sedes', roles: ['admin'],
@@ -20,8 +20,24 @@ export default {
           if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = 'Confirmar'; return; }
           try { await db(supabase.rpc('remove_member', { p_id: m.id })); toast('Miembro quitado.'); loadMembers(); } catch (e) { toast(e.message, 'error'); }
         } }, 'Quitar');
-        return h('div', { class: 'row-card' }, h('div', null, h('strong', null, m.email), ' ', badge(roleLabel[m.role]), ' ', badge(m.site_name || 'Todas las sedes')), btn);
+        const pw = h('button', { type: 'button', onclick: async () => {
+          if (!pw.dataset.sure) { pw.dataset.sure = '1'; pw.textContent = 'Confirmar: cierra sus sesiones'; return; }
+          pw.disabled = true;
+          try { showTemp(m.email, await db(supabase.rpc('admin_reset_member_password', { p_user: m.user_id }))); pw.textContent = 'Clave temporal'; delete pw.dataset.sure; }
+          catch (err) { toast(err.message, 'error'); pw.textContent = 'Clave temporal'; delete pw.dataset.sure; } finally { pw.disabled = false; }
+        } }, 'Clave temporal');
+        return h('div', { class: 'row-card' }, h('div', null, h('strong', null, m.email), ' ', badge(roleLabel[m.role]), ' ', badge(m.site_name || 'Todas las sedes')), h('div', { class: 'actions' }, pw, btn));
       }) : [empty('Sin miembros.')]));
+    };
+    const showTemp = (email, pass) => {
+      const site = location.origin + location.pathname;
+      const body = 'Hola,\n\nTu acceso a VISIONPARK fue restablecido.\n\nEnlace: ' + site + '\nCorreo: ' + email + '\nContraseña temporal: ' + pass + '\n\nAl ingresar, el sistema te pedirá crear una contraseña propia de inmediato.';
+      const copy = h('button', { type: 'button', class: 'primary', onclick: async () => { try { await navigator.clipboard.writeText(pass); toast('Contraseña copiada.'); } catch { toast('No se pudo copiar; selecciónala manualmente.', 'error'); } } }, 'Copiar');
+      openModal('Clave temporal de ' + email, h('div', null,
+        h('p', { class: 'muted' }, 'Se muestra una sola vez y no queda guardada en claro. Al ingresar con ella, la persona deberá crear su propia contraseña de inmediato. Sus sesiones abiertas se cerraron.'),
+        h('p', null, h('code', { class: 'plate', style: 'font-size:18px;user-select:all' }, pass)),
+        h('div', { class: 'row' }, copy,
+          h('a', { class: 'btn', href: 'mailto:' + encodeURIComponent(email) + '?subject=' + encodeURIComponent('Tu acceso temporal a VISIONPARK') + '&body=' + encodeURIComponent(body) }, 'Enviar por mi correo'))));
     };
     const addBtn = h('button', { type: 'submit', class: 'primary' }, 'Agregar miembro');
     const sName = h('input', { maxLength: 120, placeholder: 'Nombre de la sede' }), sAddr = h('input', { maxLength: 200, placeholder: 'Dirección (opcional)' });
