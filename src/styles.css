@@ -142,3 +142,12 @@ th{color:var(--muted);font-weight:600;background:var(--panel2)}
 .toast.warn{background:var(--warn-bg);color:var(--warn);border-color:#6B5320}
 @media (max-width:600px){.topbar .who{display:none}.topbar{gap:8px}.nav{top:57px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.pwbox{position:relative;display:flex}
+.pwbox input{padding-right:92px}
+.pwbox button{position:absolute;right:4px;top:4px;height:36px;padding:0 12px;font-size:13px}
+.linkrow{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px}
+button.link{height:auto;padding:4px 0;border:0;background:none;color:var(--ai);font:500 13px "IBM Plex Sans",sans-serif;text-decoration:underline;text-underline-offset:3px}
+.help{margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.help ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:14px}
+.help li{margin:6px 0}

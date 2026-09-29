@@ -27,18 +27,35 @@ function store(op, v) {
 }
 function setMode(m) {
   mode = m;
+  const reset = m === 'reset';
   for (const [id, k] of [['tab-login', 'login'], ['tab-owner', 'owner'], ['tab-team', 'team']]) $(id).setAttribute('aria-selected', String(k === m));
   $('owner-fields').hidden = m !== 'owner';
-  $('btn-login').textContent = m === 'login' ? 'Ingresar' : m === 'owner' ? 'Crear cuenta de propietario' : 'Crear mi cuenta';
+  $('pw-wrap').hidden = reset;
+  $('password').required = !reset;
+  $('link-row').hidden = m !== 'login';
+  $('back-row').hidden = !reset;
+  $('acc-help').hidden = true;
+  $('btn-login').textContent = { login: 'Ingresar', owner: 'Crear cuenta de propietario', team: 'Crear mi cuenta', reset: 'Enviarme el enlace' }[m];
   $('password').autocomplete = m === 'login' ? 'current-password' : 'new-password';
   $('auth-hint').textContent = { login: 'Ingresa con tu correo y contraseña.',
     owner: 'El propietario crea la organización y queda como administrador. Recibirás un correo para confirmar la cuenta.',
-    team: 'Crea tu cuenta y avisa a tu administrador: él te agrega a la organización con tu correo y tu rol.' }[m];
+    team: 'Crea tu cuenta y avisa a tu administrador: él te agrega a la organización con tu correo y tu rol.',
+    reset: 'Escribe el correo de tu cuenta y te enviamos un enlace para crear una contraseña nueva.' }[m];
   say(authMsg, ''); $('btn-resend').hidden = true;
 }
 $('tab-login').addEventListener('click', () => setMode('login'));
 $('tab-owner').addEventListener('click', () => setMode('owner'));
 $('tab-team').addEventListener('click', () => setMode('team'));
+$('link-forgot-pw').addEventListener('click', () => setMode('reset'));
+$('link-back').addEventListener('click', () => setMode('login'));
+$('link-forgot-acc').addEventListener('click', () => { $('acc-help').hidden = !$('acc-help').hidden; });
+$('btn-acc-to-pw').addEventListener('click', () => { setMode('reset'); $('email').focus(); });
+$('btn-show').addEventListener('click', () => {
+  const show = $('password').type === 'password';
+  $('password').type = show ? 'text' : 'password';
+  $('btn-show').textContent = show ? 'Ocultar' : 'Mostrar';
+  $('btn-show').setAttribute('aria-pressed', String(show));
+});
 
 function friendly(error) {
   const m = (error.message || '').toLowerCase();
@@ -46,6 +63,8 @@ function friendly(error) {
   if (m.includes('email not confirmed')) return 'Tu correo aún no está confirmado. Abre el enlace que te enviamos o reenvíalo.';
   if (m.includes('invalid login')) return 'Correo o contraseña incorrectos, o la cuenta aún no está confirmada.';
   if (m.includes('already registered')) return 'Ese correo ya tiene cuenta. Usa «Ingresar».';
+  if (m.includes('same password') || m.includes('different from the old')) return 'La nueva contraseña debe ser distinta de la anterior.';
+  if (m.includes('weak') || m.includes('pwned') || m.includes('easy to guess')) return 'Esa contraseña es muy débil o aparece en filtraciones conocidas. Usa otra más larga.';
   return error.message;
 }
 function credentials() {
@@ -55,6 +74,7 @@ function credentials() {
 }
 $('auth-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (mode === 'reset') return sendReset();
   const cred = credentials(); if (!cred) return;
   const btn = $('btn-login'); btn.disabled = true;
   try {
@@ -77,6 +97,16 @@ $('auth-form').addEventListener('submit', async (e) => {
     }
   } finally { btn.disabled = false; }
 });
+async function sendReset() {
+  const email = $('email').value.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return say(authMsg, 'Escribe el correo de tu cuenta.', 'error');
+  const btn = $('btn-login'); btn.disabled = true;
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: REDIRECT });
+    if (error) return say(authMsg, friendly(error), 'error');
+    say(authMsg, 'Si ese correo tiene cuenta, te llegará un enlace en unos minutos. Revisa también spam. El enlace vence pronto y sirve una sola vez.', 'good');
+  } finally { btn.disabled = false; }
+}
 $('btn-resend').addEventListener('click', async () => {
   const email = $('email').value.trim();
   if (!email) return say(authMsg, 'Escribe tu correo primero.', 'error');
@@ -163,11 +193,39 @@ function show(which, msg, kind) {
   $('auth-shell').hidden = which === 'app';
   $('app').hidden = which !== 'app';
   $('auth-card').hidden = which !== 'auth';
+  $('recovery-card').hidden = which !== 'recovery';
   $('app-card').hidden = which !== 'onboard';
   if (msg) say(appMsg, msg, kind);
 }
 
+let recovering = false;
+$('recovery-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const p1 = $('new-pw').value, p2 = $('new-pw2').value, msg = $('rec-msg');
+  if (p1.length < 8) return say(msg, 'La contraseña debe tener al menos 8 caracteres.', 'error');
+  if (p1 !== p2) return say(msg, 'Las dos contraseñas no coinciden.', 'error');
+  $('btn-newpw').disabled = true;
+  const { error } = await supabase.auth.updateUser({ password: p1 });
+  $('btn-newpw').disabled = false;
+  if (error) return say(msg, friendly(error), 'error');
+  recovering = false; $('new-pw').value = $('new-pw2').value = '';
+  toast('Contraseña actualizada.');
+  boot();
+});
+
+/* Errores que Supabase devuelve en la dirección (enlace vencido o ya usado) */
+{
+  const p = new URLSearchParams(location.hash.replace(/^#/, ''));
+  if (p.get('error')) {
+    const expired = /expired|otp/i.test((p.get('error_code') || '') + (p.get('error_description') || ''));
+    history.replaceState(null, '', location.pathname);
+    say(authMsg, expired ? 'El enlace venció o ya se usó. Pide otro con «Olvidé mi contraseña».' : 'No se pudo validar el enlace: ' + (p.get('error_description') || p.get('error')), 'error');
+  }
+}
+
 supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'PASSWORD_RECOVERY') { recovering = true; show('recovery'); return; }
+  if (recovering || event === 'USER_UPDATED') return;
   if (!session) { ctx.user = null; ctx.org = null; ctx.site = null; show('auth'); return; }
   if (event === 'TOKEN_REFRESHED' || (event === 'SIGNED_IN' && ctx.user?.id === session.user.id && !$('app').hidden)) return;
   setTimeout(boot, 0); // evita bloqueos dentro del callback de auth

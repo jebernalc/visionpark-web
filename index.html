@@ -16,7 +16,7 @@
 <main class="shell" id="auth-shell">
   <header class="brand">
     <svg viewBox="0 0 32 32" width="36" height="36" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8" fill="none" stroke="#4FD1C5" stroke-width="2"/><path d="M9 12V9h3M20 9h3v3M23 20v3h-3M12 23H9v-3" fill="none" stroke="#4FD1C5" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="16" r="3.5" fill="#4FD1C5"/></svg>
-    <div><h1>VISIONPARK</h1><p>FORENSIC AI · <span id="version">v0.2.0</span></p></div>
+    <div><h1>VISIONPARK</h1><p>FORENSIC AI · <span id="version">v0.2.1</span></p></div>
   </header>
 
   <section class="card" id="auth-card" aria-labelledby="t-auth">
@@ -36,14 +36,48 @@
       </div>
       <label for="email">Correo</label>
       <input id="email" name="email" type="email" autocomplete="username" required>
-      <label for="password">Contraseña</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" minlength="8" required>
+      <div id="pw-wrap">
+        <label for="password">Contraseña</label>
+        <div class="pwbox">
+          <input id="password" name="password" type="password" autocomplete="current-password" minlength="8" required>
+          <button type="button" id="btn-show" aria-pressed="false" aria-label="Mostrar contraseña">Mostrar</button>
+        </div>
+      </div>
       <div class="row">
         <button type="submit" class="primary" id="btn-login">Ingresar</button>
         <button type="button" id="btn-resend" hidden>Reenviar correo de confirmación</button>
       </div>
+      <div class="linkrow" id="link-row">
+        <button type="button" class="link" id="link-forgot-pw">Olvidé mi contraseña</button>
+        <button type="button" class="link" id="link-forgot-acc">Olvidé mi cuenta</button>
+      </div>
+      <div class="linkrow" id="back-row" hidden><button type="button" class="link" id="link-back">← Volver a ingresar</button></div>
     </form>
+    <div id="acc-help" class="help" hidden>
+      <h3>¿Cuál es mi cuenta?</h3>
+      <p>Tu cuenta es el <strong>correo</strong> con el que te registraste; no hay otro nombre de usuario.</p>
+      <ul>
+        <li>Busca en tu bandeja (y en spam) un correo de «Supabase Auth» o «noreply@mail.app.supabase.io» con asunto <em>Confirm Your Signup</em>: llegó al correo que usaste.</li>
+        <li>Si eres <strong>propietario</strong> y usaste otro correo, prueba con cada uno en «Olvidé mi contraseña»: solo el que exista recibirá el enlace.</li>
+        <li>Si eres <strong>del equipo</strong>, pide a tu administrador que revise tu correo en «Equipo y sedes».</li>
+        <li>Si ya no tienes acceso a ese correo, el administrador de Supabase del proyecto puede corregirlo.</li>
+      </ul>
+      <div class="row"><button type="button" class="primary" id="btn-acc-to-pw">Recuperar con un correo</button></div>
+    </div>
     <p id="auth-msg" class="msg" role="status"></p>
+  </section>
+
+  <section class="card" id="recovery-card" hidden aria-labelledby="t-rec">
+    <h2 id="t-rec">Define tu nueva contraseña</h2>
+    <p class="muted">Escribe una contraseña nueva de al menos 8 caracteres.</p>
+    <form id="recovery-form" novalidate>
+      <label for="new-pw">Nueva contraseña</label>
+      <input id="new-pw" type="password" autocomplete="new-password" minlength="8" required>
+      <label for="new-pw2">Repite la contraseña</label>
+      <input id="new-pw2" type="password" autocomplete="new-password" minlength="8" required>
+      <div class="row"><button type="submit" class="primary" id="btn-newpw">Guardar contraseña</button></div>
+    </form>
+    <p id="rec-msg" class="msg" role="status"></p>
   </section>
 
   <section class="card" id="app-card" hidden aria-labelledby="t-app">

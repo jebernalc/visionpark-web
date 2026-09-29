@@ -1,5 +1,10 @@
 # Historial de versiones
 
+## 0.2.1 · 2026-09-29
+- «Olvidé mi contraseña»: envía un enlace y abre una pantalla para definir la contraseña nueva (con confirmación).
+- «Olvidé mi cuenta»: guía para encontrar el correo con el que te registraste y recuperarlo.
+- Botón «Mostrar» en la contraseña, mensajes claros para enlaces vencidos o ya usados y para contraseñas débiles.
+
 ## 0.2.0 · 2026-09-29
 - Aplicación con menú por rol y selector de sede: Panel, Sesiones, Captura, Mesa de comparación, Hallazgos y reclamaciones, Prompts, Motor IA, Auditoría y Equipo y sedes.
 - Captura del Pasaporte Visual (24 vistas) con huella SHA-256 en el dispositivo, subida al bucket privado y estimación de calidad.
