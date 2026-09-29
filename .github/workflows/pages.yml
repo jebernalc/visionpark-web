@@ -1,0 +1,43 @@
+name: Publicar en GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Nunca publicar la clave de servicio
+        run: |
+          if grep -RIn -E "service_role|sb_secret_" index.html 404.html src/ ; then
+            echo "Se encontró una referencia a una clave secreta. Abortando."; exit 1
+          fi
+      - name: Validar archivos esenciales
+        run: test -f index.html && test -f src/app.js && test -f src/config.js
+
+  desplegar:
+    needs: verificar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
