@@ -127,7 +127,7 @@ export default {
         const list = [...results.values()].map((x) => x.verdict), overall = overallVerdict(list);
         if (canReview) for (const v of withClaim) { const x = results.get(v.code), r = recsFor(v); if (x?.stay && x?.cl) {
           try { await db(supabase.from('ai_comparisons').insert({ org_id: ctx.org.id, site_id: ctx.site.id, session_id: session.id, evidence_in: r.ingreso.evidence_id, evidence_out: r.reclamacion[0].evidence_id,
-            result: { engine: 'vision-local-1', tipo: 'reclamacion', vista: v.code, reclamacion: claim.id, veredicto: x.verdict.code, coincidencia: x.verdict.overlap, similitud_ingreso_salida: x.stay.ssim, cambio_ingreso_salida_pct: x.stay.changedPct, cambio_ingreso_reclamacion_pct: x.cl.changedPct, confianza: x.verdict.confidence } })); } catch { /* ya guardado o sin permiso */ } } }
+            result: { engine: 'vision-local-2', tipo: 'reclamacion', vista: v.code, reclamacion: claim.id, veredicto: x.verdict.code, coincidencia: x.verdict.overlap, similitud_ingreso_salida: x.stay.ssim, cambio_ingreso_salida_pct: x.stay.changedPct, cambio_ingreso_reclamacion_pct: x.cl.changedPct, confianza: x.verdict.confidence } })); } catch { /* ya guardado o sin permiso */ } } }
         drawCompare();
         const box = h('div', { class: 'verdict ' + overall.code }, h('strong', null, 'Resultado orientativo: ' + overall.label),
           h('p', null, overall.code === 'indicios' ? 'Al menos una vista muestra en la reclamación cambios que ya eran visibles en la salida.' : overall.code === 'sin_indicios' ? 'En las vistas concluyentes, los cambios de la reclamación no aparecen en las fotos de salida.' : 'Las fotos disponibles no permiten una conclusión automática.'),

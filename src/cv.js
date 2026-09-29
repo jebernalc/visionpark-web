@@ -25,7 +25,7 @@ function grayOf(bmp, W, H) {
   return out;
 }
 /* Media local con imagen integral */
-function boxMean(src, W, H, r) {
+export function boxMean(src, W, H, r) {
   const I = new Float64Array((W + 1) * (H + 1));
   for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += src[y * W + x]; I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + row; } }
   const out = new Float32Array(W * H);

@@ -1,5 +1,13 @@
 # Historial de versiones
 
+## 0.5.0 · 2026-09-29 · Laboratorio forense de imagen
+- **Laboratorio de píxeles** en el visor: botón «Mejorar píxeles (automático)» que mide la foto y elige los ajustes, y modos Poca luz/sombras, Reflejos y brillos, Rayones finos, Relieve/abolladuras y Máximo forense (×2). Etapas reales sobre una copia: reducción de ruido bilateral, recuperación de sombras (Retinex), relleno de reflejos, contraste local CLAHE, claridad, enfoque con umbral, balance de blancos y ampliación ×2/×3. Ver original ⇄ mejorada.
+- **Diagnóstico de calidad** por foto: luz, zonas oscuras, brillos, reflejos, contraste, nitidez, ruido, histograma y recomendaciones.
+- **Lupa de píxeles** con valores RGB y coordenadas reales; **Zona ampliada**: recorte de la foto original a máxima resolución, mejorado (ampliar, rayones, relieve, reflejos) para ingreso, salida y reclamación.
+- **Buscar novedades** (análisis reforzado): compara original y mejorada, confirma lo que aparece en ambas y clasifica cada zona (rayón, abolladura/deformación, mancha, golpe/fractura, reflejo) con lista de verificación de lo buscado y dibujo de las zonas.
+- Visor con imágenes fijas arriba mientras se ajustan las herramientas.
+- El informe PDF incorpora el análisis reforzado, la calidad de las fotos y las ampliaciones de la zona principal; motor `vision-local-2`.
+
 ## 0.4.0 · 2026-09-29
 - Nueva pantalla **Reclamaciones** y expediente por reclamación: zona para cargar fotos (arrastrar, galería o cámara), huella SHA-256, etiqueta de vista y nota por foto; las fotos no se borran.
 - Comparación de tres momentos (ingreso, salida, reclamación) por vista y análisis de visión digital (alineación, normalización de luz, mapa de cambios, SSIM, abstención) con veredicto orientativo: indicios / sin indicios / no concluyente.

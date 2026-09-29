@@ -2,9 +2,11 @@
 import { supabase, ctx, h, db, can, toast, openModal, fmtDate, sha256Hex, badge, REVIEW } from './lib.js';
 import { loadBitmap, analyzePair, claimVerdict, overallVerdict, thumbData, overlayData } from './cv.js';
 import { APP_VERSION } from './config.js';
+import { robustCompare, CLASSES } from './novelties.js';
+import { enhanceCrop, diagnose, PRESETS, BASE } from './enhance.js';
 
 const JSPDF_URL = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm';
-const ENGINE = 'vision-local-1';
+const ENGINE = 'vision-local-2';
 const T = (s) => String(s ?? '').replace(/[→⇒]/g, '->').replace(/[—–]/g, '-').replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
   .replace(/…/g, '...').replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/[•●]/g, '-').replace(/×/g, 'x').replace(/[^\u0000-ÿ]/g, '');
 const dt = (s) => (s ? new Date(s).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '-');
@@ -41,6 +43,8 @@ export async function generateReport({ session, claim, options = {}, onProgress 
       r.bm.a = a ? await loadBitmap(a.evidence_files.storage_path) : null; r.bm.b = b ? await loadBitmap(b.evidence_files.storage_path) : null; r.bm.c = c ? await loadBitmap(c.evidence_files.storage_path) : null;
       if (r.bm.a && r.bm.b) r.stay = await analyzePair(r.bm.a, r.bm.b);
       if (claim && r.bm.a && r.bm.c) r.cl = await analyzePair(r.bm.a, r.bm.c);
+      { const tgt = claim ? r.bm.c : r.bm.b; if (r.bm.a && tgt) { try { r.rob = await robustCompare(r.bm.a, tgt); r.robRef = claim ? 'reclamacion' : 'salida'; } catch { /* sin análisis reforzado */ } }
+        r.dg = {}; for (const k of ['a', 'b', 'c']) if (r.bm[k]) { try { const q = diagnose(r.bm[k]); delete q.hist; r.dg[k] = q; } catch { /* sin diagnóstico */ } } }
       if (claim && r.stay && r.cl) r.verdict = claimVerdict(r.stay, r.cl);
       else if (claim && r.cl) r.verdict = { code: 'no_concluyente', label: 'No concluyente', reason: 'Falta la foto de salida de esta vista.', confidence: 'abstencion' };
     } catch (e) { r.error = e.message; }
@@ -172,8 +176,45 @@ export async function generateReport({ session, claim, options = {}, onProgress 
   }
   if (!detailed.length) P(claim ? 'No hay fotos de la reclamacion asignadas a una vista: no se generaron comparaciones detalladas.' : 'No se detectaron cambios relevantes que requieran detalle grafico.', { color: muted });
 
+  /* 5b. Análisis reforzado y novedades */
+  const robRows = results.filter((r) => r.rob), nb = robRows.length ? 1 : 0;
+  if (robRows.length) {
+    newPage(); H1('6. Analisis reforzado de novedades');
+    P('Cada par de fotos se analiza dos veces: con las fotos originales y con una copia mejorada (reduccion de ruido, recuperacion de sombras y reflejos, contraste local). Una zona solo se considera "confirmada" si aparece en ambas. Luego se clasifica con reglas medibles (forma, relieve, color, bordes y brillo). Las clases son hipotesis para revision humana, no un dictamen de dano.', { size: 9, color: muted });
+    const QL = { buena: 'buena', media: 'media', baja: 'baja' };
+    robRows.forEach((r) => {
+      const reg = r.rob.regions.filter((z) => z.status !== 'solo_original'), conf = reg.filter((z) => z.status === 'confirmada');
+      need(46); doc.setFillColor(...ink); doc.rect(M, y - 4.5, UW, 7, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(255, 255, 255); doc.text(T(r.view.code + ' · ' + r.view.name + '  (ingreso vs ' + r.robRef + ')'), M + 2, y); y += 6.5;
+      const q = r.dg || {}; P('Calidad de las fotos: ' + ['a:Ingreso', 'b:Salida', 'c:Reclamacion'].filter((x) => q[x[0]]).map((x) => `${x.slice(2)} ${QL[q[x[0]].grade]} (luz ${q[x[0]].mean}, reflejos ${q[x[0]].glarePct}%, nitidez ${q[x[0]].sharp}, ruido ${q[x[0]].noise})`).join(' · ') + '.', { size: 8.5, color: muted });
+      if (r.rob.confidence === 'abstencion') P('El motor se abstiene: ' + (r.rob.notes[0] || 'fotos no comparables') + '.', { size: 9, color: VCOLOR.indicios });
+      else if (!reg.length) P('No se detectaron zonas de cambio, ni en las fotos originales ni en las mejoradas.', { size: 9, color: VCOLOR.sin_indicios });
+      else {
+        P(`${conf.length} zona(s) confirmada(s) en original y mejorada; ${reg.length - conf.length} solo en la mejorada.`, { size: 9, bold: true });
+        reg.slice(0, 5).forEach((z, k) => P(`${k + 1}. ${(CLASSES[z.cls] || CLASSES.otro).label} - probabilidad ${z.likelihood} - ${z.status === 'confirmada' ? 'confirmada' : 'solo en la mejorada'} - ${z.areaPct}% del area. ${z.evidence.join('; ')}.`, { size: 8.5, gap: 0.6, x: M + 3, w: UW - 3 }));
+        const top = reg[0]; r.top = top;
+      }
+      y += 3;
+    });
+    /* Ampliaciones de la zona principal */
+    const crops = robRows.filter((r) => r.top);
+    if (crops.length) {
+      P('Ampliacion de la zona principal (recortada de la foto original a maxima resolucion y mejorada)', { bold: true, size: 10 });
+      for (const r of crops) {
+        onProgress(0.9, `Ampliando zona de ${r.view.code}`);
+        const srcs = [['INGRESO', r.bm.a], [r.robRef === 'reclamacion' ? 'RECLAMACION' : 'SALIDA', r.robRef === 'reclamacion' ? r.bm.c : r.bm.b]];
+        const reg = { x: r.top.x, y: r.top.y, w: r.top.w, h: r.top.h }, ims = [];
+        for (const [lbl, bmp] of srcs) { const c = await enhanceCrop(bmp, reg, { ...BASE, ...PRESETS.forense.p, scale: 1 }, 520); ims.push({ lbl, data: c.canvas.toDataURL('image/jpeg', 0.8), w: c.canvas.width, h: c.canvas.height, f: c.factor }); }
+        const bw = (UW - 4) / 2, bh = Math.min(70, bw * ims[0].h / ims[0].w); need(bh + 14);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); setC(ink); doc.text(T(r.view.code + ' · ' + (CLASSES[r.top.cls] || CLASSES.otro).label + ' (hipotesis)'), M, y); y += 3;
+        ims.forEach((im, k) => { const x = M + k * (bw + 4), sc = Math.min(bw / im.w, bh / im.h), iw = im.w * sc, ih = im.h * sc; doc.setFillColor(20, 24, 32); doc.rect(x, y, bw, bh, 'F'); doc.addImage(im.data, 'JPEG', x + (bw - iw) / 2, y + (bh - ih) / 2, iw, ih);
+          doc.setFillColor(0, 0, 0); doc.rect(x, y, 34, 4.4, 'F'); doc.setTextColor(255, 255, 255); doc.setFontSize(6.5); doc.text(T(im.lbl + ' x' + im.f), x + 1.5, y + 3); });
+        y += bh + 6;
+      }
+    }
+  }
+
   /* 6. Hallazgos */
-  H1('6. Hallazgos y revision humana');
+  H1((6 + nb) + '. Hallazgos y revision humana');
   if (!D.findings.length) P('No hay hallazgos registrados para esta sesion.', { color: muted });
   D.findings.forEach((f) => { need(18); const rv = D.reviews.filter((x) => x.finding_id === f.id); doc.setFont('helvetica', 'bold'); doc.setFontSize(10); setC(ink);
     doc.text(T((D.parts[f.part_code] || f.part_code || 'Pieza sin definir') + ' / ' + (D.damages[f.damage_code] || f.damage_code || 'Dano sin definir')), M, y); y += 4.6;
@@ -181,7 +222,7 @@ export async function generateReport({ session, claim, options = {}, onProgress 
     rv.forEach((x) => P(`Revision ${dt(x.created_at)}: ${x.decision}${x.corrected_state ? ' (estado ' + x.corrected_state + ')' : ''}${x.note ? ' - ' + x.note : ''}`, { size: 8.5, gap: 0.5 })); y += 3; });
 
   /* 7. Metodología */
-  H1('7. Metodologia y limites');
+  H1((7 + nb) + '. Metodologia y limites');
   P('El analisis de vision digital de este informe (motor ' + ENGINE + ') es determinista y se ejecuta en el navegador de quien genera el informe; las fotos no se envian a terceros. Pasos:', { size: 9.5 });
   ['Captura y huella: cada foto se firma con SHA-256 en el dispositivo y se guarda como original inmutable.',
    'Normalizacion de la iluminacion: cada punto se expresa respecto a su vecindario para reducir el efecto de cambios de luz, sombras y exposicion.',
@@ -190,15 +231,18 @@ export async function generateReport({ session, claim, options = {}, onProgress 
    'Zonas: se agrupan los puntos conectados; cada zona recibe su area y una severidad orientativa (leve menos de 1%, moderado de 1% a 4%, mayor desde 4% del area).',
    'Similitud estructural (SSIM) global como medida de que tan comparables son las dos fotos.',
    'Cruce con la reclamacion: se mide que parte de los cambios ingreso-reclamacion ya eran visibles en ingreso-salida. 50% o mas: indicios; 15% o menos: sin indicios; en medio: no concluyente.',
+   'Analisis reforzado: se repite la comparacion sobre una copia mejorada (bilateral para ruido, retinex para sombras, relleno de reflejos, CLAHE y enfoque). Una zona solo se confirma si aparece en la original y en la mejorada.',
+   'Clasificacion: forma (elongacion), cambio de luz y de color, aparicion de bordes, relieve suave y brillos permiten proponer rayon, abolladura, mancha, golpe o reflejo. Son hipotesis.',
    'Abstencion: si las fotos estan muy desplazadas o parecen de otro punto de vista, el sistema no concluye.'].forEach((t, i) => P((i + 1) + '. ' + t, { size: 9, gap: 1, x: M + 3, w: UW - 3 }));
   P('Limites', { bold: true, size: 10 });
   ['Detecta diferencias visuales, no interpreta si son dano; suciedad, lluvia, reflejos, sombras o cambios de angulo pueden aparecer como cambios.',
-   'Trabaja con una version reducida de las fotos (400 px de ancho): rayones muy finos pueden no detectarse.',
+   'La comparacion usa versiones reducidas (400 px y 640 px de ancho): rayones extremadamente finos pueden no detectarse; por eso existe la ampliacion de zona.',
+   'La mejora de imagen hace mas legible lo que la camara capto, pero no crea detalle nuevo.',
    'Los resultados son orientativos; toda conclusion requiere revision y aprobacion humana.',
    'El servidor de IA de vision profunda aun no interviene en este informe.'].forEach((t) => P('- ' + t, { size: 9, gap: 1, x: M + 3, w: UW - 3 }));
 
   /* 8. Conclusión y firmas */
-  H1('8. Conclusion y firmas');
+  H1((8 + nb) + '. Conclusion y firmas');
   P(claim ? `Resultado automatico: ${VLABEL[overall.code]}. La determinacion final corresponde a la persona responsable tras revisar las imagenes y este informe.` : 'Este informe documenta las diferencias visuales detectadas entre el ingreso y la salida. La determinacion final corresponde a la persona responsable.');
   need(50); y += 8;
   [['Elaboro', generatedBy], ['Reviso', ''], ['Aprobo', '']].forEach(([role, who], i) => { const x = M + i * (UW / 3 + 1); doc.setDrawColor(...ink); doc.setLineWidth(0.3); doc.line(x, y + 16, x + UW / 3 - 6, y + 16); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); setC(ink); doc.text(role, x, y + 21); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); setC(muted); doc.text(doc.splitTextToSize(T(who || 'Nombre, cargo y fecha'), UW / 3 - 6), x, y + 25.5); });

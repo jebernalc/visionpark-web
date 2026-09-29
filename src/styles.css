@@ -182,3 +182,28 @@ button.link{height:auto;padding:4px 0;border:0;background:none;color:var(--ai);f
 .verdict.no_concluyente{border-color:#6B5320;background:var(--warn-bg)}.verdict.no_concluyente strong{color:var(--warn)}
 a.primary-link{background:var(--ai);border-color:var(--ai);color:#06211F}
 .nav a{scroll-margin:8px}
+
+/* v0.5 · laboratorio forense de imagen */
+.loupe{position:fixed;z-index:9999;width:168px;background:#0b0f14;border:2px solid var(--accent,#4FD1C5);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.6);pointer-events:none;overflow:hidden}
+.loupe canvas{display:block;width:168px;height:168px;image-rendering:pixelated}
+.loupe div{font-size:10.5px;padding:4px 6px;color:#cfe;white-space:nowrap}
+.novbox{position:absolute;border:2px solid;border-radius:3px;pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+.novbox span{position:absolute;top:-1px;left:-1px;color:#000;font-size:11px;font-weight:700;padding:0 5px;border-radius:0 0 4px 0}
+.toolbox.lab{border-color:rgba(79,209,197,.55)}
+.small{font-size:12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.chip{background:rgba(255,255,255,.06);border-radius:6px;padding:2px 8px;font-size:12px}
+.chip em{font-style:normal;color:#8fa0b3}
+canvas.hist{width:100%;height:44px;background:#0b0f14;border-radius:6px;margin-top:6px}
+.diag{padding:8px 0;border-top:1px solid rgba(255,255,255,.08)}
+.tips{margin:4px 0 0 18px;padding:0;font-size:13px;color:#e8d9a8}
+.zonegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:8px}
+.zonegrid figure{margin:0}.zonegrid canvas{width:100%;height:auto;border-radius:8px;background:#000;image-rendering:auto}
+.zonegrid figcaption{font-size:11px;color:#8fa0b3;margin-top:3px}
+.checklist{display:grid;gap:6px;margin:8px 0}
+.ck{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.05)}
+.ck.detectada{outline:1px solid rgba(255,77,109,.6)}
+.stickyview{position:sticky;top:0;z-index:6;background:var(--bg,#0D1117);padding:4px 0 8px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:10px}
+.stickyview .stage{max-height:58vh}
+.stickyview .stage .pane{max-height:58vh}
+@media(max-width:800px){.stickyview{position:static}}

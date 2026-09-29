@@ -1,5 +1,7 @@
 import { supabase, ctx, h, db, can, toast, badge, empty, field, select, openModal, fmtDate, STATES, OPERATIVE, REVIEW } from './lib.js';
 import { loadBitmap, analyzePair, claimVerdict, autoLevels } from './cv.js';
+import { enhance, enhanceCrop, diagnose, autoParams, drawHist, PRESETS, BASE, isNeutral, keyOf } from './enhance.js';
+import { robustCompare, checklist, CLASSES, SEARCHABLE } from './novelties.js';
 
 export const SRC_NAME = { ingreso: 'Ingreso', salida: 'Salida', reclamacion: 'Reclamación' };
 const SEV = { leve: '', moderado: 'warn', mayor: 'bad' };
@@ -23,10 +25,11 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
   const pick = { reclamacion: recs.reclamacion?.[0] || null };
   const recOf = (k) => (k === 'reclamacion' ? pick.reclamacion : recs[k]);
   const S = { mode: 'side', left: keys[0] || 'ingreso', right: keys[1] || keys[0] || 'salida', zoom: 1, bright: 100, contrast: 100, gamma: 1, sat: 100, sharp: 0,
-    gray: false, invert: false, edges: false, levels: false, region: null, wipe: 50, marking: false, heat: true, heatOpacity: 0.85, analysis: null, verdict: null };
+    gray: false, invert: false, edges: false, levels: false, region: null, wipe: 50, marking: false, heat: true, heatOpacity: 0.85, analysis: null, verdict: null, enh: null, enhName: '', loupe: false, novel: null, wanted: new Set(SEARCHABLE.map(([k]) => k)), zone: null, showOrig: false };
+  const enhMap = new Map(), bmpMap = new Map(); let enhBusy = false;
   if (claim && recs.reclamacion?.length) { S.left = recs.ingreso ? 'ingreso' : keys[0]; S.right = 'reclamacion'; }
   const stage = h('div', { class: 'stage' });
-  const regionEls = [];
+  const regionEls = [], novEls = [];
   let heatCanvases = [];
 
   const filt = () => `url(#vp-fx) brightness(${S.bright}%) contrast(${S.contrast}%) saturate(${S.sat}%)${S.gray ? ' grayscale(1)' : ''}${S.invert ? ' invert(1)' : ''}${S.edges ? ' brightness(2.4)' : ''}`;
@@ -60,13 +63,54 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
     wrap.addEventListener('pointerup', () => { if (start) { start = null; if (S.region && (S.region.w < 0.01 || S.region.h < 0.01)) S.region = null; paintRegion(); updRegionInfo(); } });
   };
 
+
+  /* Imagen mostrada: la original (img) o la mejorada (canvas) según el modo del laboratorio */
+  const enhKey = (rec) => rec.evidence_files.storage_path + '|' + (S.enh ? keyOf(S.enh) : '');
+  const visual = (rec, label, pane, cls = '') => {
+    const c = S.enh && !S.showOrig ? enhMap.get(enhKey(rec)) : null;
+    if (c) { const cv = h('canvas', { class: ('base ' + cls).trim(), width: c.width, height: c.height, role: 'img', 'aria-label': label + ' (mejorada)' }); cv.getContext('2d').drawImage(c, 0, 0); if (pane) pane.style.aspectRatio = c.width + ' / ' + c.height; return cv; }
+    const img = h('img', { class: cls, src: urlOf(rec.evidence_files.storage_path), alt: label, draggable: false });
+    if (pane) img.addEventListener('load', () => { pane.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight; });
+    return img;
+  };
+  const bitmapOf = async (rec) => { const p = rec.evidence_files.storage_path; if (!bmpMap.has(p)) bmpMap.set(p, await loadBitmap(p)); return bmpMap.get(p); };
+  const statusEl = h('span', { class: 'muted', role: 'status' });
+  const prepEnh = async () => {
+    if (!S.enh) return;
+    const need = [...new Set([S.left, S.right, ...(S.mode === 'three' ? keys : [])])].map(recOf).filter(Boolean).filter((r) => !enhMap.has(enhKey(r)));
+    if (!need.length) return;
+    enhBusy = true;
+    try { for (let i = 0; i < need.length; i++) { statusEl.textContent = `Mejorando píxeles… foto ${i + 1} de ${need.length}`; const b = await bitmapOf(need[i]); enhMap.set(enhKey(need[i]), await enhance(b, S.enh)); }
+      statusEl.textContent = `Mejora aplicada: ${S.enhName || 'personalizada'}${S.enh.scale > 1 ? ' · ampliación ×' + S.enh.scale : ''}. Solo se ve una copia; el original no cambia.`; }
+    catch (e) { statusEl.textContent = ''; toast('No se pudo mejorar la imagen: ' + e.message, 'error'); S.enh = null; }
+    enhBusy = false;
+  };
+
+  /* Lupa de píxeles: muestra los píxeles reales (sin suavizar) bajo el puntero y sus valores */
+  const loupeEl = (() => { let el = document.getElementById('vp-loupe'); if (!el) { el = h('div', { id: 'vp-loupe', class: 'loupe', hidden: true }, h('canvas', { width: 168, height: 168 }), h('div', { class: 'mono' })); document.body.append(el); } return el; })();
+  const attachLoupe = (wrap, rec) => {
+    const cvs = loupeEl.querySelector('canvas'), info = loupeEl.querySelector('div'), g = cvs.getContext('2d'), probe = document.createElement('canvas'); probe.width = probe.height = 1; const pg = probe.getContext('2d', { willReadFrequently: true });
+    let src = null;
+    wrap.addEventListener('pointerleave', () => { loupeEl.hidden = true; });
+    wrap.addEventListener('pointermove', async (e) => {
+      if (!S.loupe || S.marking) { loupeEl.hidden = true; return; }
+      if (!src || src.rec !== rec || src.enh !== (S.enh ? keyOf(S.enh) : '') || src.orig !== !!S.showOrig) { const c = S.enh && !S.showOrig ? enhMap.get(enhKey(rec)) : null; src = { rec, enh: S.enh ? keyOf(S.enh) : '', orig: !!S.showOrig, img: c || await bitmapOf(rec) }; }
+      const r = wrap.getBoundingClientRect(), iw = src.img.width, ih = src.img.height, fit = Math.min(r.width / iw, r.height / ih), ox = (r.width - iw * fit) / 2, oy = (r.height - ih * fit) / 2;
+      const px = Math.floor((e.clientX - r.left - ox) / fit), py = Math.floor((e.clientY - r.top - oy) / fit);
+      if (px < 0 || py < 0 || px >= iw || py >= ih) { loupeEl.hidden = true; return; }
+      const N = 21, half = 10; g.imageSmoothingEnabled = false; g.fillStyle = '#000'; g.fillRect(0, 0, 168, 168);
+      g.drawImage(src.img, px - half, py - half, N, N, 0, 0, 168, 168);
+      g.strokeStyle = '#4FD1C5'; g.lineWidth = 2; g.strokeRect(half * 8, half * 8, 8, 8);
+      pg.clearRect(0, 0, 1, 1); pg.drawImage(src.img, px, py, 1, 1, 0, 0, 1, 1); const d = pg.getImageData(0, 0, 1, 1).data;
+      info.textContent = `x ${px}  y ${py}  ·  R${d[0]} G${d[1]} B${d[2]}  ·  luz ${Math.round(0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2])}`;
+      loupeEl.hidden = false; loupeEl.style.left = Math.min(window.innerWidth - 190, e.clientX + 18) + 'px'; loupeEl.style.top = Math.min(window.innerHeight - 210, e.clientY + 18) + 'px';
+    });
+  };
+
   const mkPane = (key, label = SRC_NAME[key]) => {
     const rec = recOf(key), wrap = h('div', { class: 'zoomwrap' }), pane = h('div', { class: 'pane' }, h('span', { class: 'panelabel' }, label), wrap);
-    if (rec) {
-      const img = h('img', { src: urlOf(rec.evidence_files.storage_path), alt: label, draggable: false });
-      img.addEventListener('load', () => { pane.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight; });
-      wrap.append(img);
-    } else wrap.append(h('div', { class: 'ph small' }, 'Sin foto de ' + label.toLowerCase()));
+    if (rec) { wrap.append(visual(rec, label, pane)); attachLoupe(wrap, rec); }
+    else wrap.append(h('div', { class: 'ph small' }, 'Sin foto de ' + label.toLowerCase()));
     return { pane, wrap };
   };
   const addHeat = (wrap) => {
@@ -76,7 +120,7 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
   };
 
   const build = async () => {
-    stage.replaceChildren(); regionEls.length = 0; heatCanvases = [];
+    await prepEnh(); stage.replaceChildren(); regionEls.length = 0; heatCanvases = []; novEls.length = 0;
     stage.className = 'stage ' + S.mode + (S.marking ? ' marking' : '');
     const L = mkPane(S.left), R = mkPane(S.right);
     if (S.mode === 'side') { stage.append(L.pane, R.pane); attachMark(L.wrap); attachMark(R.wrap); addHeat(R.wrap); }
@@ -86,9 +130,8 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
     } else if (S.mode === 'wipe') {
       const wrap = h('div', { class: 'zoomwrap' }), pane = h('div', { class: 'pane' }, h('span', { class: 'panelabel' }, `${SRC_NAME[S.left]} ◂ ▸ ${SRC_NAME[S.right]}`), wrap);
       const rl = recOf(S.left), rr = recOf(S.right);
-      const first = h('img', { src: rl ? urlOf(rl.evidence_files.storage_path) : '', alt: SRC_NAME[S.left], draggable: false });
-      first.addEventListener('load', () => { pane.style.aspectRatio = first.naturalWidth + ' / ' + first.naturalHeight; });
-      const top = h('img', { class: 'top', src: rr ? urlOf(rr.evidence_files.storage_path) : '', alt: SRC_NAME[S.right], draggable: false });
+      const first = rl ? visual(rl, SRC_NAME[S.left], pane) : h('div');
+      const top = rr ? visual(rr, SRC_NAME[S.right], null, 'top') : h('div');
       top.style.clipPath = `inset(0 0 0 ${S.wipe}%)`; wrap.append(first, top); attachMark(wrap); addHeat(wrap);
       const slider = h('input', { type: 'range', min: 0, max: 100, value: S.wipe, 'aria-label': 'Posición de la cortina', class: 'wipe', oninput: (e) => { S.wipe = +e.target.value; top.style.clipPath = `inset(0 0 0 ${S.wipe}%)`; } });
       stage.append(pane, slider);
@@ -99,14 +142,14 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
       const rl = recOf(S.left), rr = recOf(S.right);
       if (rl && rr) {
         try {
-          const [ba, bb] = await Promise.all([loadBitmap(rl.evidence_files.storage_path), loadBitmap(rr.evidence_files.storage_path)]);
+          const [ba0, bb0] = await Promise.all([bitmapOf(rl), bitmapOf(rr)]), ba = (S.enh && enhMap.get(enhKey(rl))) || ba0, bb = (S.enh && enhMap.get(enhKey(rr))) || bb0;
           const an = await analyzePair(ba, bb), sc = 800 / an.W, g = cv.getContext('2d');
           g.drawImage(ba, 0, 0, 800, 600); g.globalCompositeOperation = 'difference'; g.drawImage(bb, -an.shift.dx * sc, -an.shift.dy * sc, 800, 600); g.globalCompositeOperation = 'source-over';
           cv.style.filter = 'brightness(4) contrast(1.4)';
         } catch (e) { toast('No se pudo calcular la diferencia: ' + e.message, 'error'); }
       } else stage.append(empty('La diferencia necesita las dos fotos.'));
     }
-    applyZoom(); applyFx(); paintRegion();
+    applyZoom(); applyFx(); paintRegion(); paintNovel();
   };
 
   /* --- Barra de herramientas --- */
@@ -115,9 +158,9 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
   const modeItems = [['side', 'Lado a lado'], ...(keys.length > 2 ? [['three', 'Las tres']] : []), ['wipe', 'Cortina'], ['diff', 'Diferencia']];
   const modes = seg(modeItems, S.mode, (m) => { S.mode = m; build(); }, 'Modo de comparación');
   const nameOpts = keys.map((k) => [k, SRC_NAME[k]]);
-  const selL = select(nameOpts, S.left, { 'aria-label': 'Foto de referencia', onchange: (e) => { S.left = e.target.value; S.analysis = null; renderAnalysis(); build(); } });
-  const selR = select(nameOpts, S.right, { 'aria-label': 'Foto a comparar', onchange: (e) => { S.right = e.target.value; S.analysis = null; renderAnalysis(); build(); } });
-  const claimPick = (recs.reclamacion?.length || 0) > 1 ? select(recs.reclamacion.map((r, i) => [String(i), `Foto de la reclamación ${i + 1}`]), '0', { 'aria-label': 'Foto de la reclamación', onchange: (e) => { pick.reclamacion = recs.reclamacion[+e.target.value]; S.analysis = null; renderAnalysis(); build(); } }) : null;
+  const selL = select(nameOpts, S.left, { 'aria-label': 'Foto de referencia', onchange: (e) => { S.left = e.target.value; S.analysis = null; S.novel = null; renderAnalysis(); drawNovel(); build().then(renderDiag); } });
+  const selR = select(nameOpts, S.right, { 'aria-label': 'Foto a comparar', onchange: (e) => { S.right = e.target.value; S.analysis = null; S.novel = null; renderAnalysis(); drawNovel(); build().then(renderDiag); } });
+  const claimPick = (recs.reclamacion?.length || 0) > 1 ? select(recs.reclamacion.map((r, i) => [String(i), `Foto de la reclamación ${i + 1}`]), '0', { 'aria-label': 'Foto de la reclamación', onchange: (e) => { pick.reclamacion = recs.reclamacion[+e.target.value]; S.analysis = null; S.novel = null; renderAnalysis(); drawNovel(); build().then(renderDiag); } }) : null;
 
   const sliders = [];
   const ctl = (label, min, max, key, fmt, step = 1) => {
@@ -135,6 +178,109 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
     h('div', { class: 'tools' }, ctl('Zoom', 1, 6, 'zoom', (v) => v + '×', 0.25), ctl('Brillo', 20, 250, 'bright', (v) => v + '%'), ctl('Contraste', 40, 300, 'contrast', (v) => v + '%'),
       ctl('Gamma', 0.4, 2.5, 'gamma', (v) => v.toFixed(1), 0.1), ctl('Saturación', 0, 250, 'sat', (v) => v + '%'), ctl('Nitidez', 0, 3, 'sharp', (v) => v.toFixed(1), 0.1)),
     h('div', { class: 'row tight' }, tog('levels', 'Niveles automáticos'), tog('gray', 'Blanco y negro'), tog('invert', 'Invertir'), tog('edges', 'Detectar bordes')));
+
+
+  /* --- Laboratorio de píxeles --- */
+  const paintNovel = () => {
+    stage.querySelectorAll('.novbox').forEach((n) => n.remove());
+    if (!S.novel || !S.novelShow) return;
+    stage.querySelectorAll('.zoomwrap').forEach((wr) => { S.novel.regions.filter((r) => r.status !== 'solo_original' || S.novelAll).forEach((r, i) => {
+      const c = CLASSES[r.cls] || CLASSES.otro, b = h('div', { class: 'novbox', style: `left:${r.x * 100}%;top:${r.y * 100}%;width:${r.w * 100}%;height:${r.h * 100}%;border-color:${c.color}` }, h('span', { style: `background:${c.color}` }, String(i + 1)));
+      wr.append(b); });
+    });
+  };
+  const applyEnh = async (params, name) => {
+    S.enh = params && !isNeutral(params) ? { ...BASE, ...params } : null; S.enhName = name || ''; S.showOrig = false; origBtn.setAttribute('aria-pressed', 'false');
+    syncLab(); if (!S.enh) statusEl.textContent = 'Sin mejora: se ven las fotos originales.'; await build(); renderDiag();
+  };
+  let enhTimer = null;
+  const labSliders = [];
+  const lslider = (label, min, max, key, fmt, step = 1) => {
+    const out = h('output', null, fmt((S.enh || BASE)[key])), inp = h('input', { type: 'range', min, max, step, value: (S.enh || BASE)[key], 'aria-label': label, oninput: (e) => {
+      const v = +e.target.value; out.textContent = fmt(v); S.enh = { ...(S.enh || BASE), [key]: v }; S.enhName = 'personalizada'; clearTimeout(enhTimer); statusEl.textContent = 'Ajustando…'; enhTimer = setTimeout(() => applyEnh(S.enh, 'personalizada'), 450); } });
+    labSliders.push({ key, inp, out, fmt }); return h('label', { class: 'ctl' }, h('span', null, label), inp, out);
+  };
+  const syncLab = () => { labSliders.forEach((s2) => { const v = (S.enh || BASE)[s2.key]; s2.inp.value = v; s2.out.textContent = s2.fmt(v); }); scaleSeg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.k === (S.enh?.scale || 1)))); wbBtn.setAttribute('aria-pressed', String(!!S.enh?.wb)); reliefBtn.setAttribute('aria-pressed', String(!!S.enh?.relief)); };
+  const origBtn = h('button', { type: 'button', 'aria-pressed': 'false', onclick: async () => { S.showOrig = !S.showOrig; origBtn.setAttribute('aria-pressed', String(S.showOrig)); await build(); } }, 'Ver original ⇄ mejorada');
+  const scaleSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Ampliación' }, [1, 2, 3].map((k) => h('button', { type: 'button', 'data-k': k, 'aria-pressed': String(k === 1), onclick: () => { S.enh = { ...(S.enh || BASE), scale: k }; applyEnh(S.enh, 'personalizada'); } }, k === 1 ? 'Tamaño original' : 'Ampliar ×' + k)));
+  const wbBtn = h('button', { type: 'button', 'aria-pressed': 'false', onclick: () => { S.enh = { ...(S.enh || BASE), wb: !S.enh?.wb }; applyEnh(S.enh, 'personalizada'); } }, 'Balance de blancos');
+  const reliefBtn = h('button', { type: 'button', 'aria-pressed': 'false', onclick: () => { S.enh = { ...(S.enh || BASE), relief: !S.enh?.relief }; applyEnh(S.enh, 'personalizada'); } }, 'Modo relieve');
+  const loupeBtn = h('button', { type: 'button', 'aria-pressed': 'false', onclick: () => { S.loupe = !S.loupe; loupeBtn.setAttribute('aria-pressed', String(S.loupe)); if (!S.loupe) loupeEl.hidden = true; } }, '🔍 Lupa de píxeles');
+  const autoBtn = h('button', { type: 'button', class: 'primary', onclick: async () => {
+    autoBtn.disabled = true; statusEl.textContent = 'Midiendo la foto para elegir los ajustes…';
+    try { const rec = recOf(S.right) || recOf(S.left), q = diagnose(await bitmapOf(rec)); await applyEnh(autoParams(q), 'automática'); } catch (e) { toast(e.message, 'error'); } finally { autoBtn.disabled = false; }
+  } }, '✨ Mejorar píxeles (automático)');
+  const presetBtns = ['poca_luz', 'reflejos', 'rayones', 'relieve', 'forense'].map((k) => h('button', { type: 'button', title: PRESETS[k].hint, onclick: () => applyEnh({ ...BASE, ...PRESETS[k].p }, PRESETS[k].name) }, PRESETS[k].name));
+  const lab = h('div', { class: 'toolbox lab' },
+    h('div', { class: 'toolhead' }, h('strong', null, 'Laboratorio de píxeles'), h('span', { class: 'muted' }, 'Mejora una copia de las fotos con el mismo ajuste para las dos.')),
+    h('div', { class: 'row tight' }, autoBtn, ...presetBtns, h('button', { type: 'button', onclick: () => applyEnh(null) }, 'Quitar mejora')),
+    h('div', { class: 'tools' }, lslider('Reducir ruido', 0, 3, 'denoise', (v) => ['no', 'suave', 'medio', 'fuerte'][v]), lslider('Recuperar sombras', 0, 1, 'shadows', (v) => Math.round(v * 100) + '%', 0.05), lslider('Bajar reflejos', 0, 1, 'highlights', (v) => Math.round(v * 100) + '%', 0.05),
+      lslider('Contraste local', 0, 1, 'clahe', (v) => Math.round(v * 100) + '%', 0.05), lslider('Claridad', 0, 1, 'clarity', (v) => Math.round(v * 100) + '%', 0.05), lslider('Enfoque', 0, 2, 'sharpen', (v) => v.toFixed(1), 0.1)),
+    h('div', { class: 'row tight' }, scaleSeg, wbBtn, reliefBtn), h('div', null, statusEl),
+    h('p', { class: 'muted small' }, 'La ampliación reconstruye por interpolación y enfoque: hace más legible lo que la cámara captó, pero no inventa detalle nuevo. Por eso el veredicto no se toma solo de una imagen mejorada: el análisis reforzado exige coincidencia con la original.'));
+
+  /* Diagnóstico de calidad de cada foto */
+  const diagBox = h('div', { class: 'card' });
+  const renderDiag = async () => {
+    const list = [...new Set([S.left, S.right])].filter((k) => recOf(k));
+    const rows = [];
+    for (const k of list) { try {
+      const q = diagnose(await bitmapOf(recOf(k))), cv = h('canvas', { class: 'hist', width: 256, height: 44, 'aria-label': 'Histograma de luz' }); drawHist(cv, q.hist);
+      const grade = badge('Calidad ' + q.grade, q.grade === 'buena' ? 'ok' : q.grade === 'media' ? 'warn' : 'bad');
+      rows.push(h('div', { class: 'diag' }, h('div', { class: 'row tight' }, h('strong', null, SRC_NAME[k]), grade, h('span', { class: 'muted' }, `${q.w}×${q.h} px · ${q.mp} MP`)), cv,
+        h('div', { class: 'chips' }, [['Luz media', q.mean + '/255'], ['Zonas oscuras', q.darkPct + '%'], ['Brillos', q.brightPct + '%'], ['Reflejos', q.glarePct + '%'], ['Contraste', q.contrast], ['Nitidez', q.sharp], ['Ruido', q.noise]].map(([a, b]) => h('span', { class: 'chip' }, h('em', null, a), ' ', b))),
+        q.tips.length ? h('ul', { class: 'tips' }, q.tips.map((t) => h('li', null, t))) : h('p', { class: 'muted' }, 'La foto tiene buena luz, contraste y nitidez.')));
+    } catch { /* sin diagnóstico */ } }
+    diagBox.replaceChildren(h('h3', null, 'Diagnóstico de calidad'), h('p', { class: 'muted' }, 'Mide luz, reflejos, ruido y nitidez para saber qué tan confiable es cada foto y qué mejora conviene.'), ...rows);
+  };
+
+  /* Zona ampliada y mejorada desde la foto original a máxima resolución */
+  const zoneBox = h('div', { class: 'card' });
+  const drawZone = () => {
+    const kids = [h('h3', null, 'Zona ampliada'), h('p', { class: 'muted' }, 'Marca una zona en la imagen (▭ Marcar zona) o usa una zona detectada, y aquí se recorta de la foto original y se mejora al máximo.')];
+    const run = (name, p) => h('button', { type: 'button', onclick: async () => {
+      if (!S.region) return toast('Primero marca una zona en la imagen.', 'error');
+      zoneOut.replaceChildren(h('p', { class: 'muted' }, 'Ampliando y mejorando la zona…'));
+      try {
+        const cells = [];
+        for (const k of keys.filter((x) => recOf(x))) { const r = await enhanceCrop(await bitmapOf(recOf(k)), S.region, p, 520); r.canvas.className = 'zoomimg'; cells.push(h('figure', null, r.canvas, h('figcaption', null, `${SRC_NAME[k]} · ×${r.factor} desde ${r.src.w}×${r.src.h} px`))); }
+        zoneOut.replaceChildren(h('div', { class: 'zonegrid' }, cells));
+      } catch (e) { zoneOut.replaceChildren(h('p', { class: 'msg error' }, e.message)); }
+    } }, name);
+    const zoneOut = h('div');
+    kids.push(h('div', { class: 'row tight' }, run('Ampliar y mejorar la zona', { ...BASE, ...PRESETS.forense.p, scale: 1 }), run('Rayones en la zona', { ...BASE, ...PRESETS.rayones.p }), run('Relieve de la zona', { ...BASE, ...PRESETS.relieve.p }), run('Reflejos en la zona', { ...BASE, ...PRESETS.reflejos.p })), zoneOut);
+    zoneBox.replaceChildren(...kids);
+  };
+
+  /* Búsqueda de novedades */
+  const novBox = h('div', { class: 'card' });
+  const drawNovel = () => {
+    const kids = [h('h3', null, 'Buscar novedades'), h('p', { class: 'muted' }, 'Compara las dos fotos elegidas (original y mejorada), confirma lo que aparece en ambas y clasifica cada zona. Marca qué buscas:')];
+    kids.push(h('div', { class: 'row tight' }, SEARCHABLE.map(([k, l]) => h('label', { class: 'ctl inline' }, h('input', { type: 'checkbox', checked: S.wanted.has(k), onchange: (e) => { e.target.checked ? S.wanted.add(k) : S.wanted.delete(k); if (S.novel) drawNovel(); } }), ' ', l))));
+    const run = h('button', { type: 'button', class: 'primary', onclick: async () => {
+      const rl = recOf(S.left), rr = recOf(S.right); if (!rl || !rr || S.left === S.right) return toast('Elige dos fotos distintas.', 'error');
+      run.disabled = true;
+      try { const [a, b] = await Promise.all([bitmapOf(rl), bitmapOf(rr)]); S.novel = await robustCompare(a, b, { onProgress: (t) => { run.textContent = t; } }); S.novelShow = true; await build(); }
+      catch (e) { toast(e.message, 'error'); } finally { run.disabled = false; drawNovel(); }
+    } }, S.novel ? 'Repetir la búsqueda' : 'Buscar novedades (análisis reforzado)');
+    kids.push(h('div', { class: 'row tight' }, run));
+    const r = S.novel;
+    if (r) {
+      if (r.confidence === 'abstencion') kids.push(h('p', { class: 'msg error' }, 'El motor se abstiene: ' + (r.notes[0] || 'las fotos no son comparables.')));
+      else {
+        const ck = checklist(r, [...S.wanted]), ST = { detectada: ['Detectada', 'bad'], posible: ['Posible (revisar)', 'warn'], no_detectada: ['No se detecta', 'ok'], no_concluyente: ['No concluyente', 'warn'] };
+        kids.push(h('div', { class: 'checklist' }, ck.map((c) => h('div', { class: 'ck ' + c.state }, h('span', null, c.label), badge(ST[c.state][0], ST[c.state][1])))));
+        kids.push(h('label', { class: 'ctl inline' }, h('input', { type: 'checkbox', checked: S.novelShow, onchange: (e) => { S.novelShow = e.target.checked; paintNovel(); } }), ' Dibujar las zonas sobre la imagen'), ' ', h('label', { class: 'ctl inline' }, h('input', { type: 'checkbox', checked: !!S.novelAll, onchange: (e) => { S.novelAll = e.target.checked; paintNovel(); drawNovel(); } }), ' Incluir las que solo aparecen en la original'));
+        const shown = r.regions.filter((x) => x.status !== 'solo_original' || S.novelAll);
+        kids.push(shown.length ? h('div', { class: 'list' }, shown.map((x, i) => h('div', { class: 'row-card compact' }, h('div', null, h('strong', null, `${i + 1}. ${(CLASSES[x.cls] || CLASSES.otro).label}`), ' ', badge('Probabilidad ' + x.likelihood, x.likelihood === 'alta' ? 'bad' : x.likelihood === 'media' ? 'warn' : ''), ' ', badge(x.status === 'confirmada' ? 'Confirmada en original y mejorada' : x.status === 'solo_mejorada' ? 'Solo en la mejorada' : 'Solo en la original', x.status === 'confirmada' ? 'ok' : 'warn'),
+          h('div', { class: 'muted' }, `${x.areaPct}% del área · ` + x.evidence.join(' · '))), h('button', { type: 'button', onclick: () => { S.region = { x: x.x, y: x.y, w: x.w, h: x.h }; paintRegion(); updRegionInfo(); toast('Zona marcada: usa «Zona ampliada».'); } }, 'Usar como zona'))))
+          : h('p', { class: 'msg good' }, 'No se detectaron cambios relevantes entre estas dos fotos, ni en la original ni en la mejorada.'));
+        kids.push(h('p', { class: 'muted small' }, 'Las clases son hipótesis calculadas con forma, relieve, color y bordes; una persona debe confirmarlas mirando la zona ampliada. Confianza del alineado: ' + r.confidence + '.'));
+        r.notes.forEach((n) => kids.push(h('p', { class: 'muted' }, '⚠ ' + n)));
+      }
+    }
+    novBox.replaceChildren(...kids);
+  };
 
   const markBtn = h('button', { type: 'button', 'aria-pressed': 'false', onclick: () => { S.marking = !S.marking; markBtn.setAttribute('aria-pressed', String(S.marking)); stage.classList.toggle('marking', S.marking); if (S.marking && S.zoom !== 1) { S.zoom = 1; syncTools(); applyZoom(); } } }, '▭ Marcar zona');
   const clearBtn = h('button', { type: 'button', onclick: () => { S.region = null; paintRegion(); updRegionInfo(); } }, 'Quitar marca');
@@ -170,7 +316,7 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
         can(...REVIEW) ? h('div', { class: 'row tight' }, h('button', { type: 'button', onclick: async () => {
           try {
             await db(supabase.from('ai_comparisons').insert({ org_id: ctx.org.id, site_id: ctx.site.id, session_id: session.id, evidence_in: recOf(S.left).evidence_id, evidence_out: recOf(S.right).evidence_id,
-              result: { engine: 'vision-local-1', vista: view.code, referencia: S.left, comparada: S.right, similitud: a.ssim, area_cambio_pct: a.changedPct, ajuste: a.shift, confianza: a.confidence, umbral: a.threshold, zonas: a.regions, notas: a.notes } }));
+              result: { engine: 'vision-local-2', vista: view.code, referencia: S.left, comparada: S.right, similitud: a.ssim, area_cambio_pct: a.changedPct, ajuste: a.shift, confianza: a.confidence, umbral: a.threshold, zonas: a.regions, notas: a.notes, novedades: S.novel ? { estado: S.novel.confidence, zonas: S.novel.regions.map((z) => ({ clase: z.cls, prob: z.likelihood, estado: z.status, x: z.x, y: z.y, w: z.w, h: z.h })) } : null, mejora: S.enh || null } }));
             toast('Análisis guardado en el expediente.');
           } catch (e) { toast(e.message, 'error'); }
         } }, 'Guardar análisis')) : null);
@@ -203,7 +349,7 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
         : badge('En cola: el servidor de IA responderá cuando esté conectado', 'warn'),
       q.answer && !q.decision && q.user_id === ctx.user.id ? h('div', { class: 'row tight' }, ['aceptada', 'corregida', 'rechazada'].map((d) => h('button', { type: 'button', onclick: async () => { try { await db(supabase.from('ai_queries').update({ decision: d, decided_at: new Date().toISOString() }).eq('id', q.id)); loadQ(); } catch (e) { toast(e.message, 'error'); } } }, d[0].toUpperCase() + d.slice(1)))) : (q.decision ? badge('Decisión: ' + q.decision, 'ok') : null))) : [empty('Aún no hay consultas para esta vista.')]));
   };
-  side.append(anaBox);
+  side.append(anaBox, novBox, zoneBox, diagBox);
   if (can(...OPERATIVE)) {
     const lib = select([['', 'Prompt de la biblioteca…'], ...prompts.map((p) => [p.id, p.title])], '');
     const txt = h('textarea', { rows: 4, maxLength: 4000, placeholder: 'Ej.: ¿Hay rayones nuevos en la zona marcada que no estaban al ingreso?' });
@@ -236,8 +382,9 @@ export function openViewer({ session, view, recs, urlOf, parts, damages, prompts
 
   const info = keys.map((k) => { const r = recOf(k); return r?.evidence_files ? h('p', { class: 'muted mono' }, `${SRC_NAME[k]} · SHA-256 ${r.evidence_files.sha256_client.slice(0, 16)}… · ${fmtDate(r.evidence_files.captured_at)}`) : null; });
   const body = h('div', { class: 'viewer' }, h('div', { class: 'vmain' },
-    h('div', { class: 'toolbar' }, modes, h('span', { class: 'muted' }, 'Comparar'), selL, h('span', { class: 'muted' }, 'con'), selR, claimPick),
-    tools, h('div', { class: 'toolbar' }, markBtn, clearBtn, regionInfo), stage, ...info), side);
+    h('div', { class: 'stickyview' }, h('div', { class: 'toolbar' }, modes, h('span', { class: 'muted' }, 'Comparar'), selL, h('span', { class: 'muted' }, 'con'), selR, claimPick),
+      h('div', { class: 'toolbar' }, markBtn, clearBtn, loupeBtn, origBtn, regionInfo), stage),
+    lab, tools, ...info), side);
   openModal(view.code + ' · ' + view.name, body, { wide: true });
-  updRegionInfo(); renderAnalysis(); build(); loadQ();
+  updRegionInfo(); renderAnalysis(); drawNovel(); drawZone(); build().then(renderDiag); loadQ();
 }
