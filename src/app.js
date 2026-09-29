@@ -5,13 +5,15 @@ import sesiones from './screens/sesiones.js';
 import captura from './screens/captura.js';
 import mesa from './screens/mesa.js';
 import hallazgos from './screens/hallazgos.js';
+import reclamaciones from './screens/reclamaciones.js';
+import reclamacion from './screens/reclamacion.js';
 import prompts from './screens/prompts.js';
 import motor from './screens/motor.js';
 import equipo from './screens/equipo.js';
 import auditoria from './screens/auditoria.js';
 
 const $ = (id) => document.getElementById(id);
-const SCREENS = [panel, sesiones, captura, mesa, hallazgos, prompts, motor, auditoria, equipo];
+const SCREENS = [panel, sesiones, captura, reclamaciones, reclamacion, mesa, hallazgos, prompts, motor, auditoria, equipo];
 $('version').textContent = 'v' + APP_VERSION; $('version2').textContent = 'v' + APP_VERSION;
 
 /* ---------- Acceso ---------- */
@@ -144,13 +146,13 @@ function drawNav() {
 }
 async function route() {
   if (!ctx.site) return;
-  const [, id = 'panel', param] = location.hash.split('/');
+  const [, id = 'panel', param, param2] = location.hash.split('/');
   let screen = SCREENS.find((s) => s.id === id) || panel;
   if (!allowed(screen)) { toast('Tu rol no tiene acceso a esa sección.', 'error'); screen = panel; }
   drawNav();
   const root = h('div', { class: 'screen' });
   $('view').replaceChildren(root);
-  try { await screen.render(root, param); } catch (e) { root.append(h('p', { class: 'msg error' }, 'No se pudo cargar: ' + e.message)); }
+  try { await screen.render(root, param, param2); } catch (e) { root.append(h('p', { class: 'msg error' }, 'No se pudo cargar: ' + e.message)); }
   $('view').focus({ preventScroll: true });
 }
 window.addEventListener('hashchange', route);

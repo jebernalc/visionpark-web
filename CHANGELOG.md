@@ -1,5 +1,13 @@
 # Historial de versiones
 
+## 0.4.0 · 2026-09-29
+- Nueva pantalla **Reclamaciones** y expediente por reclamación: zona para cargar fotos (arrastrar, galería o cámara), huella SHA-256, etiqueta de vista y nota por foto; las fotos no se borran.
+- Comparación de tres momentos (ingreso, salida, reclamación) por vista y análisis de visión digital (alineación, normalización de luz, mapa de cambios, SSIM, abstención) con veredicto orientativo: indicios / sin indicios / no concluyente.
+- Visor con herramientas de mejora: brillo, contraste, gamma, saturación, nitidez, zoom, niveles automáticos, blanco y negro, invertir, bordes y ajustes rápidos (reducir reflejos, aclarar sombras, realzar rayones); modos lado a lado, las tres, cortina y diferencia; marcar zona; preguntas al motor; registro de hallazgos. El original nunca se modifica.
+- **Informe PDF de demostración** (botón en expediente y en la Mesa): portada, resumen ejecutivo, datos del caso, cronología, cadena de custodia con hashes, comparación por vista con mapas de calor, hallazgos, metodología y límites, conclusión y firmas. Se guarda con su SHA-256.
+- Migración 08: tabla claim_views con RLS y auditoría; política de inserción de comparaciones IA para revisores.
+- CSP: img-src admite blob: y supabase.co.
+
 ## 0.3.0 · 2026-09-29
 - Contraseña temporal con cambio obligatorio: quien entra con una clave temporal debe crear una propia antes de usar la aplicación; la marca se borra sola al cambiarla.
 - Equipo y sedes: botón «Clave temporal» por miembro (genera la clave, cierra sus sesiones, la muestra una sola vez y permite enviarla desde el correo del administrador).

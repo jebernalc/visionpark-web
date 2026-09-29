@@ -1,7 +1,7 @@
 import { supabase, ctx, h, db, toast, sha256Hex, signedUrls, badge, empty, OPERATIVE, can } from '../lib.js';
 
 /* Calidad estimada en el navegador: nitidez (varianza del laplaciano) y exposición */
-async function estimateQuality(file) {
+export async function estimateQuality(file) {
   try {
     const bmp = await createImageBitmap(file);
     const w = 256, hgt = Math.max(1, Math.round(bmp.height * w / bmp.width));
