@@ -1,34 +1,18 @@
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, APP_VERSION } from './config.js';
+import { supabase, ctx, h, db, toast, roleLabel } from './lib.js';
+import { APP_VERSION } from './config.js';
+import panel from './screens/panel.js';
+import sesiones from './screens/sesiones.js';
+import captura from './screens/captura.js';
+import mesa from './screens/mesa.js';
+import hallazgos from './screens/hallazgos.js';
+import prompts from './screens/prompts.js';
+import motor from './screens/motor.js';
+import equipo from './screens/equipo.js';
+import auditoria from './screens/auditoria.js';
 
 const $ = (id) => document.getElementById(id);
-const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
-$('version').textContent = 'v' + APP_VERSION;
-
-/* ---------- Compatibilidad: mejora progresiva ---------- */
-function webglOk() {
-  try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; }
-}
-const checks = [
-  { name: 'Cámara', ok: !!navigator.mediaDevices?.getUserMedia, need: true },
-  { name: 'Hash SHA-256 en origen', ok: !!globalThis.crypto?.subtle, need: true },
-  { name: 'Cola offline (IndexedDB)', ok: 'indexedDB' in globalThis, need: true },
-  { name: 'Service Worker (app instalable)', ok: 'serviceWorker' in navigator, need: false },
-  { name: 'WebGPU (IA en el navegador)', ok: 'gpu' in navigator, need: false, fallback: 'WebGL2 o WASM' },
-  { name: 'WebGL2', ok: webglOk(), need: false, fallback: 'WASM' },
-  { name: 'WebAssembly', ok: typeof WebAssembly === 'object', need: true }
-];
-const compat = $('compat');
-for (const c of checks) {
-  const li = document.createElement('li');
-  const label = document.createElement('span');
-  label.textContent = c.name;
-  const tag = document.createElement('span');
-  tag.className = 'tag ' + (c.ok ? 'ok' : c.need ? 'bad' : 'warn');
-  tag.textContent = c.ok ? 'Disponible' : c.need ? 'Falta' : (c.fallback ? 'Respaldo: ' + c.fallback : 'Opcional');
-  li.append(label, tag);
-  compat.append(li);
-}
+const SCREENS = [panel, sesiones, captura, mesa, hallazgos, prompts, motor, auditoria, equipo];
+$('version').textContent = 'v' + APP_VERSION; $('version2').textContent = 'v' + APP_VERSION;
 
 /* ---------- Acceso ---------- */
 function say(el, text, kind) { el.textContent = text; el.className = 'msg' + (kind ? ' ' + kind : ''); }
@@ -41,23 +25,20 @@ function store(op, v) {
   try { if (op === 'set') localStorage.setItem(PENDING_KEY, v); else if (op === 'del') localStorage.removeItem(PENDING_KEY); else return localStorage.getItem(PENDING_KEY); } catch { /* almacenamiento bloqueado */ }
   return null;
 }
-
 function setMode(m) {
   mode = m;
-  const owner = m === 'owner';
-  $('tab-login').setAttribute('aria-selected', String(!owner));
-  $('tab-owner').setAttribute('aria-selected', String(owner));
-  $('owner-fields').hidden = !owner;
-  $('btn-login').textContent = owner ? 'Crear cuenta de propietario' : 'Ingresar';
-  $('password').autocomplete = owner ? 'new-password' : 'current-password';
-  $('auth-hint').textContent = owner
-    ? 'El propietario crea la organización y queda como administrador. Recibirás un correo para confirmar la cuenta.'
-    : 'Ingresa con tu correo y contraseña.';
-  say(authMsg, '');
-  $('btn-resend').hidden = true;
+  for (const [id, k] of [['tab-login', 'login'], ['tab-owner', 'owner'], ['tab-team', 'team']]) $(id).setAttribute('aria-selected', String(k === m));
+  $('owner-fields').hidden = m !== 'owner';
+  $('btn-login').textContent = m === 'login' ? 'Ingresar' : m === 'owner' ? 'Crear cuenta de propietario' : 'Crear mi cuenta';
+  $('password').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+  $('auth-hint').textContent = { login: 'Ingresa con tu correo y contraseña.',
+    owner: 'El propietario crea la organización y queda como administrador. Recibirás un correo para confirmar la cuenta.',
+    team: 'Crea tu cuenta y avisa a tu administrador: él te agrega a la organización con tu correo y tu rol.' }[m];
+  say(authMsg, ''); $('btn-resend').hidden = true;
 }
 $('tab-login').addEventListener('click', () => setMode('login'));
 $('tab-owner').addEventListener('click', () => setMode('owner'));
+$('tab-team').addEventListener('click', () => setMode('team'));
 
 function friendly(error) {
   const m = (error.message || '').toLowerCase();
@@ -67,90 +48,127 @@ function friendly(error) {
   if (m.includes('already registered')) return 'Ese correo ya tiene cuenta. Usa «Ingresar».';
   return error.message;
 }
-
 function credentials() {
   const email = $('email').value.trim(), password = $('password').value;
   if (!email || password.length < 8) { say(authMsg, 'Escribe un correo válido y una contraseña de al menos 8 caracteres.', 'error'); return null; }
   return { email, password };
 }
-
 $('auth-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const cred = credentials(); if (!cred) return;
   const btn = $('btn-login'); btn.disabled = true;
   try {
+    if (mode === 'login') {
+      const { error } = await supabase.auth.signInWithPassword(cred);
+      if (error) { if (/confirm/i.test(error.message)) $('btn-resend').hidden = false; return say(authMsg, friendly(error), 'error'); }
+      return say(authMsg, '');
+    }
     if (mode === 'owner') {
       const org = $('org-name').value.trim();
       if (org.length < 2) return say(authMsg, 'Escribe el nombre de la organización.', 'error');
       store('set', JSON.stringify({ org, site: $('site-name').value.trim() || 'Sede principal' }));
-      const { data, error } = await supabase.auth.signUp({ ...cred, options: { emailRedirectTo: REDIRECT } });
-      if (error) { $('btn-resend').hidden = false; return say(authMsg, friendly(error), 'error'); }
-      if (data.user && data.user.identities && data.user.identities.length === 0) return say(authMsg, 'Ese correo ya tiene cuenta. Usa «Ingresar».', 'error');
-      if (!data.session) {
-        $('btn-resend').hidden = false;
-        say(authMsg, 'Cuenta creada. Revisa tu correo (y spam), confirma y vuelve a ingresar: la organización se creará sola.', 'good');
-      }
-    } else {
-      const { error } = await supabase.auth.signInWithPassword(cred);
-      if (error) { if (/confirm/i.test(error.message)) $('btn-resend').hidden = false; return say(authMsg, friendly(error), 'error'); }
-      say(authMsg, '');
+    } else store('del');
+    const { data, error } = await supabase.auth.signUp({ ...cred, options: { emailRedirectTo: REDIRECT } });
+    if (error) { $('btn-resend').hidden = false; return say(authMsg, friendly(error), 'error'); }
+    if (data.user && data.user.identities && data.user.identities.length === 0) return say(authMsg, 'Ese correo ya tiene cuenta. Usa «Ingresar».', 'error');
+    if (!data.session) {
+      $('btn-resend').hidden = false;
+      say(authMsg, mode === 'owner' ? 'Cuenta creada. Revisa tu correo (y spam), confirma y vuelve a ingresar: la organización se creará sola.' : 'Cuenta creada. Confirma tu correo, ingresa y avisa a tu administrador.', 'good');
     }
   } finally { btn.disabled = false; }
 });
-
 $('btn-resend').addEventListener('click', async () => {
   const email = $('email').value.trim();
   if (!email) return say(authMsg, 'Escribe tu correo primero.', 'error');
   const { error } = await supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: REDIRECT } });
   say(authMsg, error ? friendly(error) : 'Correo reenviado. Revisa tu bandeja y spam.', error ? 'error' : 'good');
 });
-
-$('btn-logout').addEventListener('click', () => supabase.auth.signOut());
+const logout = () => supabase.auth.signOut();
+$('btn-logout').addEventListener('click', logout);
+$('top-logout').addEventListener('click', logout);
 
 async function createOrg(name, site) {
   const { error } = await supabase.rpc('bootstrap_org', { p_name: name, p_site_name: site });
   if (error) { say(appMsg, 'No se pudo crear la organización: ' + error.message, 'error'); return false; }
-  store('del');
-  say(appMsg, 'Organización creada. Eres administrador.', 'good');
-  return true;
+  store('del'); return true;
 }
-
 $('btn-bootstrap').addEventListener('click', async () => {
   $('btn-bootstrap').disabled = true;
-  await createOrg('Mi organización', 'Sede principal');
+  if (await createOrg('Mi organización', 'Sede principal')) await boot();
   $('btn-bootstrap').disabled = false;
-  await loadApp();
 });
 
-/* ---------- Datos protegidos por RLS ---------- */
-async function loadApp() {
-  const { data: { user } } = await supabase.auth.getUser();
-  $('who').textContent = user?.email ?? '—';
-  const { data: rows, error } = await supabase.from('user_sites').select('role, organizations(name)').limit(1);
-  if (error) return say(appMsg, 'Error leyendo la organización: ' + error.message, 'error');
-  const has = rows && rows.length > 0;
-  $('btn-bootstrap').hidden = has;
-  $('owner-note').hidden = has;
-  if (!has) {
-    const raw = store('get');
-    if (raw) {
-      try { const p = JSON.parse(raw); if (await createOrg(p.org, p.site)) return loadApp(); } catch { store('del'); }
-    }
-  }
-  $('org').textContent = has ? rows[0].organizations?.name ?? '—' : 'Sin organización';
-  $('role').textContent = has ? rows[0].role : '—';
-  if (has) {
-    const { count } = await supabase.from('parking_sessions').select('id', { count: 'exact', head: true });
-    $('sessions').textContent = String(count ?? 0);
-    say(appMsg, '');
-  } else {
-    $('sessions').textContent = '—';
-    say(appMsg, 'Aún no perteneces a ninguna organización.');
-  }
+/* ---------- Contexto y navegación ---------- */
+const siteSelect = $('site-select');
+function computeRoles() {
+  ctx.roles = new Set(ctx.memberships.filter((m) => m.site_id == null || m.site_id === ctx.site?.id).map((m) => m.role));
+}
+const allowed = (s) => s.roles == null || s.roles.some((r) => ctx.roles.has(r));
+
+function drawNav() {
+  const nav = $('nav'); const cur = (location.hash.split('/')[1] || 'panel');
+  nav.replaceChildren(...SCREENS.filter((s) => !s.hidden && allowed(s)).map((s) => h('a', { href: '#/' + s.id, 'aria-current': s.id === cur ? 'page' : null }, s.title)));
+}
+async function route() {
+  if (!ctx.site) return;
+  const [, id = 'panel', param] = location.hash.split('/');
+  let screen = SCREENS.find((s) => s.id === id) || panel;
+  if (!allowed(screen)) { toast('Tu rol no tiene acceso a esa sección.', 'error'); screen = panel; }
+  drawNav();
+  const root = h('div', { class: 'screen' });
+  $('view').replaceChildren(root);
+  try { await screen.render(root, param); } catch (e) { root.append(h('p', { class: 'msg error' }, 'No se pudo cargar: ' + e.message)); }
+  $('view').focus({ preventScroll: true });
+}
+window.addEventListener('hashchange', route);
+document.addEventListener('vp-sites-changed', () => loadSites().then(route));
+siteSelect.addEventListener('change', () => {
+  ctx.site = ctx.sites.find((s) => s.id === siteSelect.value); computeRoles();
+  try { sessionStorage.setItem('vp_site', ctx.site.id); } catch { /* sin almacenamiento */ }
+  route();
+});
+async function loadSites() {
+  ctx.sites = await db(supabase.from('sites').select('id,name,address').eq('org_id', ctx.org.id).order('created_at'));
+  let saved = null; try { saved = sessionStorage.getItem('vp_site'); } catch { /* sin almacenamiento */ }
+  ctx.site = ctx.sites.find((s) => s.id === (ctx.site?.id || saved)) || ctx.sites[0] || null;
+  siteSelect.replaceChildren(...ctx.sites.map((s) => h('option', { value: s.id, selected: s.id === ctx.site?.id }, s.name)));
+  siteSelect.hidden = ctx.sites.length < 2;
+  computeRoles();
 }
 
-supabase.auth.onAuthStateChange((_event, session) => {
-  $('auth-card').hidden = !!session;
-  $('app-card').hidden = !session;
-  if (session) setTimeout(loadApp, 0); // evita bloqueos dentro del callback de auth
+async function boot() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  ctx.user = user;
+  $('who').textContent = user.email;
+  let rows;
+  try { rows = await db(supabase.from('user_sites').select('site_id, role, org_id, organizations(id,name)').eq('user_id', user.id)); }
+  catch (e) { return show('onboard', 'Error leyendo tu acceso: ' + e.message, 'error'); }
+  if (!rows.length) {
+    const raw = store('get');
+    if (raw) { try { const p = JSON.parse(raw); if (await createOrg(p.org, p.site)) return boot(); } catch { store('del'); } }
+    $('btn-bootstrap').hidden = false;
+    $('owner-note').hidden = false;
+    $('owner-note').textContent = 'Aún no perteneces a ninguna organización. Si eres el propietario, créala aquí. Si eres del equipo, pide a tu administrador que te agregue con este correo.';
+    return show('onboard');
+  }
+  ctx.memberships = rows; ctx.org = rows[0].organizations;
+  await loadSites();
+  if (!ctx.site) return show('onboard', 'Tu organización no tiene sedes o no tienes acceso a ninguna.', 'error');
+  $('top-who').textContent = user.email;
+  show('app');
+  if (!location.hash || location.hash === '#') location.hash = '#/panel'; else route();
+}
+function show(which, msg, kind) {
+  $('auth-shell').hidden = which === 'app';
+  $('app').hidden = which !== 'app';
+  $('auth-card').hidden = which !== 'auth';
+  $('app-card').hidden = which !== 'onboard';
+  if (msg) say(appMsg, msg, kind);
+}
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (!session) { ctx.user = null; ctx.org = null; ctx.site = null; show('auth'); return; }
+  if (event === 'TOKEN_REFRESHED' || (event === 'SIGNED_IN' && ctx.user?.id === session.user.id && !$('app').hidden)) return;
+  setTimeout(boot, 0); // evita bloqueos dentro del callback de auth
 });

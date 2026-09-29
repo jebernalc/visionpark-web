@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; worker-src 'self' blob:; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; worker-src 'self' blob:; base-uri 'self'; form-action 'self'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0D1117">
 <title>VISIONPARK · Forensic AI</title>
@@ -13,23 +13,18 @@
 <link rel="stylesheet" href="src/styles.css">
 </head>
 <body>
-<main class="shell">
+<main class="shell" id="auth-shell">
   <header class="brand">
     <svg viewBox="0 0 32 32" width="36" height="36" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8" fill="none" stroke="#4FD1C5" stroke-width="2"/><path d="M9 12V9h3M20 9h3v3M23 20v3h-3M12 23H9v-3" fill="none" stroke="#4FD1C5" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="16" r="3.5" fill="#4FD1C5"/></svg>
-    <div><h1>VISIONPARK</h1><p>FORENSIC AI · <span id="version">v0.1.1</span></p></div>
+    <div><h1>VISIONPARK</h1><p>FORENSIC AI · <span id="version">v0.2.0</span></p></div>
   </header>
-
-  <section class="card" aria-labelledby="t-compat">
-    <h2 id="t-compat">Compatibilidad del navegador</h2>
-    <p class="muted">La captura y la IA en el navegador se activan según lo que este equipo ofrece. Lo esencial funciona en cualquier navegador moderno.</p>
-    <ul id="compat" class="compat" aria-live="polite"></ul>
-  </section>
 
   <section class="card" id="auth-card" aria-labelledby="t-auth">
     <h2 id="t-auth">Acceso</h2>
     <div class="tabs" role="tablist" aria-label="Tipo de acceso">
       <button type="button" role="tab" id="tab-login" aria-selected="true" aria-controls="auth-form">Ingresar</button>
       <button type="button" role="tab" id="tab-owner" aria-selected="false" aria-controls="auth-form">Registrar propietario</button>
+      <button type="button" role="tab" id="tab-team" aria-selected="false" aria-controls="auth-form">Soy del equipo</button>
     </div>
     <p id="auth-hint" class="muted">Ingresa con tu correo y contraseña.</p>
     <form id="auth-form" novalidate>
@@ -53,22 +48,27 @@
 
   <section class="card" id="app-card" hidden aria-labelledby="t-app">
     <h2 id="t-app">Tu organización</h2>
-    <p id="owner-note" class="muted" hidden>Tu cuenta está confirmada. Crea la organización para quedar como propietario (administrador).</p>
-    <dl class="facts">
-      <div><dt>Usuario</dt><dd id="who">—</dd></div>
-      <div><dt>Organización</dt><dd id="org">—</dd></div>
-      <div><dt>Rol</dt><dd id="role">—</dd></div>
-      <div><dt>Sesiones visibles</dt><dd id="sessions">—</dd></div>
-    </dl>
+    <p id="owner-note" class="muted" hidden></p>
+    <dl class="facts"><div><dt>Usuario</dt><dd id="who">—</dd></div></dl>
     <div class="row">
       <button type="button" class="primary" id="btn-bootstrap" hidden>Crear mi organización</button>
       <button type="button" id="btn-logout">Salir</button>
     </div>
     <p id="app-msg" class="msg" role="status"></p>
   </section>
-
-  <footer class="foot">Los originales son inmutables · Toda edición es una copia derivada</footer>
 </main>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <a class="brand-mini" href="#/panel" aria-label="Inicio"><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8" fill="none" stroke="#4FD1C5" stroke-width="2"/><circle cx="16" cy="16" r="3.5" fill="#4FD1C5"/></svg><strong>VISIONPARK</strong></a>
+    <label class="sitepick"><span class="sr">Sede activa</span><select id="site-select"></select></label>
+    <span class="who" id="top-who"></span>
+    <button type="button" id="top-logout">Salir</button>
+  </header>
+  <nav id="nav" class="nav" aria-label="Secciones"></nav>
+  <main id="view" class="view" tabindex="-1"></main>
+  <footer class="foot">Los originales son inmutables · Toda edición es una copia derivada · <span id="version2"></span></footer>
+</div>
 <script type="module" src="src/app.js"></script>
 </body>
 </html>
