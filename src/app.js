@@ -28,7 +28,7 @@ function store(op, v) {
 function setMode(m) {
   mode = m;
   const reset = m === 'reset';
-  for (const [id, k] of [['tab-login', 'login'], ['tab-owner', 'owner'], ['tab-team', 'team']]) $(id).setAttribute('aria-selected', String(k === m));
+  for (const [id, k] of [['tab-login', 'login'], ['tab-owner', 'owner'], ['tab-team', 'team']]) $(id).setAttribute('aria-selected', String(k === (reset ? 'login' : m)));
   $('owner-fields').hidden = m !== 'owner';
   $('pw-wrap').hidden = reset;
   $('password').required = !reset;
@@ -59,7 +59,9 @@ $('btn-show').addEventListener('click', () => {
 
 function friendly(error) {
   const m = (error.message || '').toLowerCase();
-  if (error.code === 'over_email_send_rate_limit' || m.includes('rate limit')) return 'Se enviaron demasiados correos. Espera unos minutos y usa «Reenviar correo de confirmación».';
+  if (error.code === 'over_email_send_rate_limit' || m.includes('rate limit')) return mode === 'reset'
+    ? 'Se alcanzó el límite de correos por hora del servicio de correo gratuito. No se perdió nada: espera unos 60 minutos antes de pedir otro enlace, o ingresa con tu contraseña actual (o la temporal que te dio el administrador).'
+    : 'Se alcanzó el límite de correos por hora del servicio de correo gratuito. Espera unos 60 minutos y usa «Reenviar correo de confirmación».';
   if (m.includes('email not confirmed')) return 'Tu correo aún no está confirmado. Abre el enlace que te enviamos o reenvíalo.';
   if (m.includes('invalid login')) return 'Correo o contraseña incorrectos, o la cuenta aún no está confirmada.';
   if (m.includes('already registered')) return 'Ese correo ya tiene cuenta. Usa «Ingresar».';

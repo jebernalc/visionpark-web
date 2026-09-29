@@ -1,5 +1,9 @@
 # Historial de versiones
 
+## 0.2.2 · 2026-09-29
+- Mensaje claro cuando se alcanza el límite de correos por hora y qué hacer mientras tanto.
+- Al recuperar la contraseña la pestaña «Ingresar» queda marcada.
+
 ## 0.2.1 · 2026-09-29
 - «Olvidé mi contraseña»: envía un enlace y abre una pantalla para definir la contraseña nueva (con confirmación).
 - «Olvidé mi cuenta»: guía para encontrar el correo con el que te registraste y recuperarlo.
