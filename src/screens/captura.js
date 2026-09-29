@@ -1,4 +1,5 @@
-import { supabase, ctx, h, db, toast, sha256Hex, signedUrls, badge, empty, OPERATIVE, can } from '../lib.js';
+import { supabase, ctx, h, db, toast, sha256Hex, signedUrls, badge, empty, select, field, openModal, fmtDate, OPERATIVE, can } from '../lib.js';
+import { reportButton } from '../report.js';
 
 /* Calidad estimada en el navegador: nitidez (varianza del laplaciano) y exposición */
 export async function estimateQuality(file) {
@@ -35,12 +36,71 @@ export default {
     progress.append(bar);
     let latest = new Map();
 
+    const claimBox = h('div'), capCard = h('div', { class: 'card' }, plabel, progress);
+    let claims = [], claimId = null;
     const load = async () => {
+      if (phase === 'reclamacion') { cells.replaceChildren(); capCard.hidden = true; return loadClaims(); }
+      claimBox.replaceChildren(); capCard.hidden = false;
       const rows = await db(supabase.from('capture_views').select('id,phase,view_code,quality,usable,created_at,evidence_files(storage_path)')
         .eq('session_id', session.id).order('created_at', { ascending: true }));
       latest = new Map(rows.map((r) => [r.phase + ':' + r.view_code, r]));
       const urlOf = await signedUrls(rows.map((r) => r.evidence_files?.storage_path));
       draw(urlOf);
+    };
+
+
+    /* --- Fase «Reclamación»: hasta 5 fotos (o más) con el mismo estilo que ingreso y salida --- */
+    const loadClaims = async () => {
+      claims = await db(supabase.from('claims').select('id,claimant_name,description,status,opened_at').eq('session_id', session.id).order('opened_at', { ascending: false }));
+      if (!claimId || !claims.some((c) => c.id === claimId)) claimId = claims[0]?.id || null;
+      await drawClaim();
+    };
+    const drawClaim = async () => {
+      const kids = [];
+      if (!claims.length) {
+        const who = h('input', { placeholder: 'Nombre de quien reclama', maxLength: 120 }), desc = h('textarea', { rows: 3, maxLength: 1000, placeholder: 'Qué reclama (pieza, daño, cuándo lo notó)' }), btn = h('button', { type: 'submit', class: 'primary' }, 'Abrir reclamación');
+        kids.push(h('form', { class: 'card', onsubmit: async (e) => { e.preventDefault(); btn.disabled = true;
+          try { const c = await db(supabase.from('claims').insert({ org_id: ctx.org.id, site_id: ctx.site.id, session_id: session.id, claimant_name: who.value.trim() || null, description: desc.value.trim() || null, created_by: ctx.user.id }).select('id').single()); claimId = c.id; toast('Reclamación abierta. Ya puedes cargar las fotos.'); await loadClaims(); }
+          catch (err) { toast(err.message, 'error'); btn.disabled = false; } } },
+          h('h3', null, 'Esta sesión aún no tiene reclamación'), h('p', { class: 'muted' }, 'Ábrela para cargar las fotos que aporta quien reclama, con el mismo esquema de las 24 vistas.'), h('div', { class: 'grid2' }, field('Reclamante', who), field('Descripción', desc)), h('div', { class: 'row' }, btn)));
+        claimBox.replaceChildren(...kids); return;
+      }
+      const claim = claims.find((c) => c.id === claimId);
+      const rows = await db(supabase.from('claim_views').select('id,view_code,note,quality,usable,created_at,evidence_files(storage_path,sha256_client,captured_at)').eq('claim_id', claim.id).order('created_at'));
+      const urlOf = await signedUrls(rows.map((r) => r.evidence_files?.storage_path));
+      const pick = claims.length > 1 ? select(claims.map((c) => [c.id, (c.claimant_name || 'Sin nombre') + ' · ' + fmtDate(c.opened_at)]), claim.id, { 'aria-label': 'Reclamación', onchange: (e) => { claimId = e.target.value; drawClaim(); } }) : null;
+      const sendOne = async (file, slotView) => {
+        if (!file.type.startsWith('image/')) return toast('Solo se admiten fotos.', 'error');
+        if (file.size > 25 * 1024 * 1024) return toast('La foto supera 25 MB.', 'error');
+        const [hash, q] = await Promise.all([sha256Hex(file), estimateQuality(file)]);
+        const ext = (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg'), path = `${ctx.org.id}/${ctx.site.id}/${session.id}/${crypto.randomUUID()}.${ext}`;
+        const up = await supabase.storage.from('evidence').upload(path, file, { contentType: file.type, upsert: false }); if (up.error) throw new Error(up.error.message);
+        const ev = await db(supabase.from('evidence_files').insert({ org_id: ctx.org.id, site_id: ctx.site.id, session_id: session.id, claim_id: claim.id, kind: 'foto', phase: 'reclamacion', storage_path: path, mime: file.type, bytes: file.size, sha256_client: hash, captured_by: ctx.user.id, device: navigator.userAgent.slice(0, 120) }).select('id').single());
+        await db(supabase.from('claim_views').insert({ org_id: ctx.org.id, site_id: ctx.site.id, claim_id: claim.id, evidence_id: ev.id, view_code: slotView || null, quality: q.quality, usable: q.usable, created_by: ctx.user.id }));
+        toast(`Foto guardada · huella ${hash.slice(0, 8)}…` + (q.usable === false ? ' · calidad baja, considera repetirla' : ''), q.usable === false ? 'warn' : 'good');
+      };
+      const many = async (files) => { for (const f of files) { try { await sendOne(f, null); } catch (e) { toast(e.message, 'error'); } } await drawClaim(); };
+      const total = Math.max(5, rows.length + (rows.length >= 5 ? 1 : 0));
+      const slot = (i) => {
+        const r = rows[i], url = r && urlOf(r.evidence_files?.storage_path);
+        const input = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'sr', 'aria-label': `Foto ${i + 1} de la reclamación`, onchange: async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { await sendOne(f, null); } catch (err) { toast(err.message, 'error'); } await drawClaim(); } });
+        const vs = r ? select([['', 'Asignar vista…'], ...views.map((v) => [v.code, `${v.code} · ${v.name}`])], r.view_code || '', { 'aria-label': 'Vista de la foto', onchange: async (e) => { try { await db(supabase.from('claim_views').update({ view_code: e.target.value || null }).eq('id', r.id)); toast('Vista asignada.'); } catch (err) { toast(err.message, 'error'); } } }) : null;
+        return h('div', { class: 'vcell' + (r ? ' done' : '') },
+          h('label', { class: 'slotpick' }, url ? h('img', { src: url, alt: `Foto ${i + 1} de la reclamación`, loading: 'lazy' }) : h('div', { class: 'ph' }, '＋'), h('span', { class: 'vname' }, `Foto ${i + 1}`), input),
+          r ? badge(r.usable === false ? 'Calidad baja' : r.quality != null ? 'Calidad ' + Math.round(r.quality * 100) + '%' : 'Guardada', r.usable === false ? 'warn' : 'ok') : null, vs);
+      };
+      const multi = h('input', { type: 'file', accept: 'image/*', multiple: true, class: 'sr', onchange: (e) => { const f = [...e.target.files]; e.target.value = ''; many(f); } });
+      const drop = h('label', { class: 'dropzone', tabindex: 0, ondragover: (e) => { e.preventDefault(); drop.classList.add('over'); }, ondragleave: () => drop.classList.remove('over'), ondrop: (e) => { e.preventDefault(); drop.classList.remove('over'); many([...e.dataTransfer.files]); } },
+        h('strong', null, 'Arrastra aquí varias fotos de la reclamación'), h('span', { class: 'muted' }, 'o toca para elegirlas de tu galería'), multi);
+      drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); multi.click(); } });
+      const withView = rows.filter((r) => r.view_code).length;
+      kids.push(h('div', { class: 'card' }, h('div', { class: 'row' }, h('strong', null, `${rows.length} foto(s) de la reclamación · ${withView} con vista asignada`), pick, badge(claim.claimant_name || 'Sin nombre')),
+        h('div', { class: 'progress' }, h('span', { style: `width:${Math.min(100, rows.length / 5 * 100)}%` })),
+        claim.description ? h('p', { class: 'muted' }, claim.description) : null,
+        h('p', { class: 'muted' }, 'Toca un cuadro para tomar o elegir la foto. Asigna a cada foto la vista (V01 a V24) que muestra, para compararla con el ingreso y la salida de esa misma vista.')),
+        h('div', { class: 'vgroup' }, h('h3', null, 'Fotos de la reclamación'), h('div', { class: 'vcells' }, Array.from({ length: total }, (_, i) => slot(i)))), drop,
+        h('div', { class: 'toolbar' }, h('a', { class: 'btn primary-link', href: `#/mesa/${session.id}/${claim.id}` }, 'Comparar ingreso · salida · reclamación'), h('a', { class: 'btn', href: '#/reclamacion/' + claim.id }, 'Abrir expediente y análisis'), reportButton({ session, claim })));
+      claimBox.replaceChildren(...kids);
     };
 
     const upload = async (view, file) => {
@@ -82,13 +142,13 @@ export default {
         })))));
     };
 
-    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Fase' }, ['ingreso', 'salida'].map((p) =>
-      h('button', { type: 'button', 'aria-pressed': String(p === phase), onclick: (e) => { phase = p; seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === e.currentTarget))); load(); } }, p === 'ingreso' ? 'Ingreso' : 'Salida')));
+    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Fase' }, ['ingreso', 'salida', 'reclamacion'].map((p) =>
+      h('button', { type: 'button', 'aria-pressed': String(p === phase), onclick: (e) => { phase = p; seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === e.currentTarget))); load(); } }, p === 'reclamacion' ? 'Reclamación' : p === 'ingreso' ? 'Ingreso' : 'Salida')));
     root.append(
       h('div', { class: 'toolbar' }, h('a', { class: 'btn', href: '#/sesiones' }, '← Sesiones'), h('h2', null, 'Pasaporte visual · ', h('span', { class: 'plate' }, session.plate)), seg,
         h('a', { class: 'btn', href: '#/mesa/' + session.id }, 'Comparar')),
       h('p', { class: 'muted' }, 'Cada foto se firma con SHA-256 en tu dispositivo antes de subirla. El original no se puede modificar ni borrar; repetir una vista guarda una nueva y conserva la anterior.'),
-      h('div', { class: 'card' }, plabel, progress), cells);
+      capCard, cells, claimBox);
     await load();
   }
 };

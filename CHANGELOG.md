@@ -1,5 +1,9 @@
 # Historial de versiones
 
+## 0.5.1 · 2026-09-29
+- Pestaña **Reclamación** dentro del Pasaporte visual, junto a Ingreso, Salida y Comparar: cinco cuadros de foto con el mismo estilo (más uno adicional al llenarlos), carga por cámara, galería o arrastrando varias a la vez, calidad estimada, huella SHA-256 y selector de vista (V01–V24) por foto.
+- Si la sesión no tiene reclamación se puede abrir ahí mismo; botones a «Comparar ingreso · salida · reclamación», al expediente con el análisis y «Generar informe PDF».
+
 ## 0.5.0 · 2026-09-29 · Laboratorio forense de imagen
 - **Laboratorio de píxeles** en el visor: botón «Mejorar píxeles (automático)» que mide la foto y elige los ajustes, y modos Poca luz/sombras, Reflejos y brillos, Rayones finos, Relieve/abolladuras y Máximo forense (×2). Etapas reales sobre una copia: reducción de ruido bilateral, recuperación de sombras (Retinex), relleno de reflejos, contraste local CLAHE, claridad, enfoque con umbral, balance de blancos y ampliación ×2/×3. Ver original ⇄ mejorada.
 - **Diagnóstico de calidad** por foto: luz, zonas oscuras, brillos, reflejos, contraste, nitidez, ruido, histograma y recomendaciones.
