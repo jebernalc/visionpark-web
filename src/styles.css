@@ -33,3 +33,8 @@ button:disabled{opacity:.6;cursor:progress}
 .facts dt{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
 .facts dd{margin:2px 0 0;font-weight:600;word-break:break-word}
 .foot{text-align:center;font:400 11px "IBM Plex Mono",monospace;color:#7C8797}
+
+.tabs{display:flex;gap:6px;margin:8px 0 12px;border-bottom:1px solid var(--line)}
+.tabs button{height:40px;border:0;border-radius:8px 8px 0 0;background:transparent;color:var(--muted);border-bottom:2px solid transparent}
+.tabs button[aria-selected="true"]{color:var(--ai);border-bottom-color:var(--ai)}
+[hidden]{display:none!important}
