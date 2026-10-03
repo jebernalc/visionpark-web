@@ -11,9 +11,10 @@ import prompts from './screens/prompts.js';
 import motor from './screens/motor.js';
 import equipo from './screens/equipo.js';
 import auditoria from './screens/auditoria.js';
+import laboratorio from './screens/laboratorio.js';
 
 const $ = (id) => document.getElementById(id);
-const SCREENS = [panel, sesiones, captura, reclamaciones, reclamacion, mesa, hallazgos, prompts, motor, auditoria, equipo];
+const SCREENS = [panel, sesiones, captura, reclamaciones, reclamacion, mesa, laboratorio, hallazgos, prompts, motor, auditoria, equipo];
 $('version').textContent = 'v' + APP_VERSION; $('version2').textContent = 'v' + APP_VERSION;
 
 /* ---------- Acceso ---------- */

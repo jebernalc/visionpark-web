@@ -1,5 +1,11 @@
 # Historial de versiones
 
+## 0.6.0 · 2026-10-03 · Laboratorio IA
+- Nuevo módulo **Laboratorio IA** (menú lateral): caja para hasta 8 fotos (mínimo 5 recomendadas) y chat con comandos: mejorar y resaltar, describir, estado de ingreso, estado de salida, comparar ingreso y salida.
+- Reconstrucción por píxeles sobre una copia (la foto original nunca se altera, huella SHA-256), resaltado de las zonas con novedad por clase, descripción en texto, detalle mejorado y veredicto de estado con nivel de confianza.
+- Informe PDF del laboratorio. Todo se procesa en el navegador; las fotos no salen del equipo.
+- Límite: una sola foto muestra lo visible, no si es nuevo; para eso se compara ingreso contra salida.
+
 ## 0.5.1 · 2026-09-29
 - Pestaña **Reclamación** dentro del Pasaporte visual, junto a Ingreso, Salida y Comparar: cinco cuadros de foto con el mismo estilo (más uno adicional al llenarlos), carga por cámara, galería o arrastrando varias a la vez, calidad estimada, huella SHA-256 y selector de vista (V01–V24) por foto.
 - Si la sesión no tiene reclamación se puede abrir ahí mismo; botones a «Comparar ingreso · salida · reclamación», al expediente con el análisis y «Generar informe PDF».
